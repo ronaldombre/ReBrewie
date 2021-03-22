@@ -1,4 +1,5 @@
 #ifndef B20Plus
+
 // Step Positions
 #define STEP_WATER_INLET  1
 #define STEP_MASH_INLET   2
@@ -61,22 +62,6 @@
 // Solenoids
 #define INLET_1             23
 #define INLET_2             24
-
-// Valves
-#define VALVE_MASH_IN       0
-#define VALVE_BOIL_RET      1
-#define VALVE_OUTLET        2
-#define VALVE_COOL          3
-#define VALVE_HOP_4         4
-#define VALVE_HOP_3         5
-#define VALVE_HOP_2         6
-#define VALVE_HOP_1         7
-#define VALVE_MASH_RET      8
-#define VALVE_BOIL_IN       9
-#define VALVE_OPEN_ANGLE    25
-#define VALVE_CLOSE_ANGLE   130
-#define VALVE_OPEN          1
-#define VALVE_CLOSE         0
 
 // Fans
 #define VENT_FAN            22

@@ -10,13 +10,17 @@ class Pump {
     void Pump_Speed_Control(uint16_t current);
     void setPumpSpeed(uint16_t pumpSpeed);
     void writeDAC();
+    void setPumpOut();
     uint8_t pumpTach();
-    //float pumpDelta();
     uint8_t pumpDiag();
     bool pumpIsDry();
+    bool pumpIsClogged();
     void pumpFlowReset();
     uint16_t pumpFlow();
     bool isRunning();
+
+    bool requestPinchValve();
+    bool requestCloseValve();
 
     volatile uint8_t* pumpTicks;
 
@@ -30,11 +34,19 @@ class Pump {
     uint16_t _pumpFlow;
     uint8_t _dryRun;
     bool _pumpDry;
+    bool _pumpIsClogged;
     uint16_t _pumpCount;
     uint8_t _pumpTries;
-    //float _pumpDelta;
     bool _pumpEnable;
     bool _running;
+    bool _pumpOut;
+    uint8_t _pumpState;
+
+    bool _requestPinchValve;
+
+    float _expectedRPM;
+    float _expectedCurrent;
+    float _percentLoad;
 
     uint32_t _pumpTime;
 };
