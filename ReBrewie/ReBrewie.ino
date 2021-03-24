@@ -1,7 +1,6 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <SPI.h>
-//#include <Wire.h>
 
 //#define B20
 
@@ -9,6 +8,7 @@
 #include "Pump.h"
 #include "Heater.h"
 #include "Valves.h"
+#include "Pressure.h"
 
 // Brewie Version setup
 #include "B20Plus.h"
@@ -138,6 +138,9 @@ void loop() {
     brewie->Temperature_Control();
     if (digitalRead(POWER_BUTTON) == HIGH) {
       powerButton = true;
+    }
+    if (digitalRead(DRAIN_BUTTON) == HIGH) {
+      drainButton = true;
     }
     if (Brewie_Read() == false) {
       // If no command over UART, Process
@@ -481,48 +484,6 @@ uint8_t floatToStringAppend(float* data, char* str) {
   char start = 6;
   start += sprintf(&str[start], "\t");
   return start;
-}
-
-bool setValve(uint8_t valve, uint8_t angle) {
-  uint16_t setAngle = 0;
-
-  // Use 0 and 1 to mean closed and open, but also allow for custom angles for higher values
-  if (angle == 0) {
-    // Valve Closed 
-    setAngle = VALVE_CLOSE_ANGLE; 
-  } else if (angle == 1) {
-    setAngle = VALVE_OPEN_ANGLE;
-  } else if (angle <= VALVE_CLOSE_ANGLE) {
-    setAngle = angle;
-  } else if (angle == 255) {
-    setAngle = VALVE_OPEN_ANGLE;
-  } else {
-    Serial.println("!Bad Valve Setpoint");
-  }
-
-  if (valveState[valve] != setAngle) {
-    valvePWM = valve;
-    OCR4A = 1000 + (uint16_t)(setAngle*17);
-    digitalWrite(PWR_EN_SERVO, HIGH);
-    TIMSK4 |= _BV(TOIE4) + _BV(OCIE4A);
-    uint32_t servoTime = millis();
-    uint16_t valveSum = 0;
-    while(millis() - servoTime < 600) {
-      for (int x = 0; x < 64; x++) {
-        valveSum += analogRead(I_VALVES);
-      }
-      uint16_t valveI = valveSum/64;
-      valveSum = 0;
-      if ((millis() - servoTime > 120) && (valveI < 35)) {
-        break;
-      }
-    }
-    delay(50);
-    digitalWrite(PWR_EN_SERVO, LOW);
-    TIMSK4 &= ~(_BV(TOIE4) + _BV(OCIE4A));
-    valveState[valve] = setAngle;
-  }
-  return valveState[valve] > VALVE_CLOSE_ANGLE;
 }
 
 void Brewie_Step() {
@@ -983,7 +944,7 @@ void Process_Sensors() {
     if (millis() - massTime > 44) {
       massTime = millis();
 
-      if (PressureReadAll(&massFast, &massTemp) == 1) {
+      if (PressureReadAll(&massFast, &massTemp, massAddress) == 1) {
         massSensor = 0xFFFF;
         TWIInit();
         if (errorCount == 0) {
@@ -1646,28 +1607,6 @@ void Brewie_Status() {
     mashPump->Pump_Speed_Control((uint16_t)mashPumpA);
     boilPump->Pump_Speed_Control((uint16_t)boilPumpA);
 
-    // Pump out special workflow
-    if (brewieStep[STEP_PRIMARY] == 4 && stepActive) {
-      if (mashPump->requestPinchValve()) {
-        if (brewieStep[STEP_BOIL_INLET] == 1) {
-          setValve(VALVE_BOIL_IN, VALVE_PINCH_ANGLE);
-          setValve(VALVE_BOIL_RET, VALVE_CLOSE);
-        }
-      } else if (mashPump->pumpIsDry()) {
-        setValve(VALVE_MASH_RET, VALVE_CLOSE);
-      }
-    }
-    if (brewieStep[STEP_PRIMARY] == 5 && stepActive) {
-      if (boilPump->requestPinchValve()) {
-        if (brewieStep[STEP_MASH_INLET] == 1) {
-          setValve(VALVE_MASH_IN, VALVE_PINCH_ANGLE);
-          //setValve(VALVE_MASH_RET, VALVE_CLOSE);
-        }
-      } else if (boilPump->pumpIsDry()) {
-        setValve(VALVE_BOIL_RET, VALVE_CLOSE);
-      }
-    }
-
     // Water Inlet functionality - Prevent Overflows
     if (brewieStep[STEP_SECONDARY] == 4) {
       if (massSensor/toLiter > 10.0) {
@@ -1735,15 +1674,16 @@ void Brewie_Status() {
           // 2 second timeout. Maybe out of steps
           stepChangeState = 0;
           lastStep = true;
-        } else {
-          /*if (brewieStep[STEP_PRIMARY] == 8) {
-            currStep = -1;
-          }*/
+        } else if (brewieStep[STEP_PRIMARY] == 8 && brewieStep[STEP_TIME] == 0) {
+          currStep = -1;
+          stepChangeState = 0;
+          lastStep = true;
         }
         break;
     }
 
     Safety_Check();
+    // Safety Check turns off lights in favor or heater indication, so fake it out by turning them on again until machine has booted
     if (powerOn) {
       if (!calibrationSent) {
         digitalWrite(POWER_LIGHT, HIGH);
@@ -1837,7 +1777,6 @@ void Initialize_2560() {
   pinMode(BOIL_PUMP_TACH, INPUT_PULLUP);
   SPI.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
   SPI.endTransaction();
-  //SPI.begin();
   
   pinMode(POWER_BUTTON, INPUT);
   pinMode(DRAIN_BUTTON, INPUT);
@@ -1852,7 +1791,6 @@ void Initialize_2560() {
 
   attachInterrupt(digitalPinToInterrupt(BOIL_PUMP_TACH), boilTachISR, FALLING);
   attachInterrupt(digitalPinToInterrupt(MASH_PUMP_TACH), mashTachISR, FALLING);
-  attachInterrupt(digitalPinToInterrupt(DRAIN_BUTTON), drainButtonISR, RISING);
 
   MashTempPin = new OneWire(MASH_TEMP);
   BoilTempPin = new OneWire(BOIL_TEMP);
@@ -1862,9 +1800,6 @@ void Initialize_2560() {
   mashPump = new Pump(MASH_PUMP, 1);
   boilPump = new Pump(BOIL_PUMP, 0);
   brewie = new Brewie;
-  /*Pump mashPump(MASH_PUMP, 1);
-  Pump boilPump(BOIL_PUMP, 0);
-  Brewie Brewie;*/
   
   brewie->setTemperatureSensors(&mashTemp, &boilTemp);
   brewie->setPowerSensor(&acMeasure);
@@ -1972,28 +1907,10 @@ void Fast_Water_Readings() {
   }
 }
 
-ISR(TIMER4_COMPA_vect){
-  cli();
-  *Valve_Port[valvePWM] &= ~Valve_Bitmask[valvePWM];
-  /*if (OCR4B > OCR4A) {
-    OCR4A += 100;
-  } else {
-    OCR4A -= 100;
-  }*/
-  sei();
-}
-
-ISR(TIMER4_OVF_vect){
-  cli();
-  *Valve_Port[valvePWM] |= Valve_Bitmask[valvePWM];
-  sei();
-}
-
+// Pulsing Interrupt
 ISR(TIMER5_COMPC_vect){
-  cli();
   //PORTL &= ~0x20;
   PORTF &= ~0x02;
-  sei();
 }
 
 ISR(TIMER5_OVF_vect){
@@ -2014,6 +1931,7 @@ ISR(TIMER5_OVF_vect){
   sei();
 }
 
+// Tachometer Interrupts
 void boilTachISR() {
   cli();
   boilTicks++;
@@ -2024,120 +1942,4 @@ void mashTachISR() {
   cli();
   mashTicks++;
   sei();
-}
-
-void drainButtonISR() {
-  cli();
-  drainButton = true;
-  sei();
-}
-
-uint8_t TWIReadACK(void) {
-    TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
-    uint32_t timeout = millis();
-    while ((TWCR & (1<<TWINT)) == 0) {
-      if (millis() - timeout > 20) {
-        break;
-      }
-    }
-    return TWDR;
-}
-
-uint8_t TWIReadNACK(void) {
-    TWCR = (1<<TWINT)|(1<<TWEN);
-    uint32_t timeout = millis();
-    while ((TWCR & (1<<TWINT)) == 0) {
-      if (millis() - timeout > 20) {
-        break;
-      }
-    }
-    return TWDR;
-}
-
-void TWIWrite(uint8_t u8data) {
-    TWDR = u8data;
-    TWCR = (1<<TWINT)|(1<<TWEN);
-    uint32_t timeout = millis();
-    while ((TWCR & (1<<TWINT)) == 0) {
-      if (millis() - timeout > 20) {
-        break;
-      }
-    }
-}
-
-void TWIStart(void) {
-    TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
-    while ((TWCR & (1<<TWINT)) == 0);
-}
-//send stop signal
-void TWIStop(void) {
-    TWCR = (1<<TWINT)|(1<<TWSTO)|(1<<TWEN);
-}
-
-uint8_t TWIGetStatus(void) {
-    uint8_t status;
-    //mask status
-    status = TWSR & 0xF8;
-    return status;
-}
-
-void TWIInit(void) {
-    //set SCL to 400kHz
-    TWCR = 0;
-    delay(10);
-    TWSR = 0x00;
-    TWBR = 72;
-    //enable TWI
-    TWCR = (1<<TWEN);
-}
-
-uint8_t PressureReadAll(int16_t *pressure, uint16_t *temperature) {
-    TWIStart();
-    if (TWIGetStatus() != 0x08)
-        return 1;
-    //select devise and send A2 A1 A0 address bits
-    TWIWrite(massAddress << 1);
-    
-    if (TWIGetStatus() != 0x18)
-        return 1;
-    //send the rest of address
-    TWIWrite(0);
-    
-    if (TWIGetStatus() != 0x28)
-        return 1;
-    //send start
-    TWIStart();
-
-    if (TWIGetStatus() != 0x10)
-        return 1;
-    //select devise and send read bit
-    TWIWrite((massAddress << 1)|1);
-    
-    if (TWIGetStatus() != 0x40)
-        return 1;
-    *pressure = TWIReadACK() << 8;
-    *pressure |= TWIReadACK();
-    *temperature = TWIReadACK() << 8;
-    *temperature |= TWIReadNACK();
-    if (TWIGetStatus() != 0x58)
-        return 1;
-    TWIStop();
-    return 0;
-}
-
-uint8_t ScanTWI() {
-  uint8_t address = 255;
-  for (uint8_t x = 0; x<129; x++) {
-    TWIStart();
-    //if (TWIGetStatus() != 0x08)
-        //return 1;
-    //select devise and send A2 A1 A0 address bits
-    TWIWrite(x << 1);    
-    if (TWIGetStatus() == 0x18) {
-      address = x;
-      break;
-    }
-    TWIStop();
-  }
-  return address;
 }

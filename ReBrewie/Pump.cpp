@@ -1,4 +1,5 @@
 #include "Pump.h"
+#include "Valves.h"
 
 #define PUMP_DRY      220
 #define PUMP_DRY_RPM  150
@@ -63,7 +64,15 @@ void Pump::Pump_Speed_Control(uint16_t current) {
         break;
       case 1: // Sensing Dry
         if (_pumpOut) {
-          _requestPinchValve = true;
+          // Pump out special workflow
+          if (valveState[VALVE_BOIL_IN] == 1) {
+            setValve(VALVE_BOIL_IN, VALVE_CLOSE);
+            setValve(VALVE_BOIL_RET, VALVE_PINCH_ANGLE);
+          }
+          if (valveState[VALVE_MASH_IN] == 1) {
+            setValve(VALVE_MASH_IN, VALVE_CLOSE);
+            setValve(VALVE_MASH_RET, VALVE_PINCH_ANGLE);
+          }
           _pumpState++;
         } else {
           _pumpDry = true;
@@ -75,17 +84,25 @@ void Pump::Pump_Speed_Control(uint16_t current) {
           setPumpSpeed(110);
           _pumpState++;
           _pumpCount = 0;
-          _requestPinchValve = false;
+          _dryRun = 0;
         }
         break;
       case 3: // Stop pumping
-        if (_pumpCount++ > 20) {
-          //setPumpSpeed(0);
+        if (_pumpCurrent < (_expectedCurrent*.7)) {
+          // Pump may be running dry
+          _dryRun++;
+        } else {
+          if (_dryRun > 0) {
+            _dryRun--;
+          }
+        }
+        if (_pumpCount++ > 30 || _dryRun > 5) {
           _pumpState = 0;
           _pumpCount = 0;
           _pumpDry = true;
-          //_pumpOut = false;
-          //_requestPinchValve = false;
+          _pumpOut = false;
+          setValve(VALVE_MASH_RET, VALVE_CLOSE);
+          setValve(VALVE_BOIL_RET, VALVE_CLOSE);
         }
         break;
       default: 
@@ -116,7 +133,7 @@ void Pump::setPumpSpeed(uint16_t pumpSpeed) {
     //digitalWrite(_pumpPin, LOW);
   } else {
     _running = true;
-    _pumpDiag = pumpSpeed;
+    _pumpDiag = 255;
     digitalWrite(_pumpPin, HIGH);
     _pumpEnable = true;
     _pumpDry = false;
@@ -141,19 +158,10 @@ void Pump::writeDAC() {
   SPI.transfer(data2);
   PORTB |= 0x10;
   SPI.endTransaction();
-  //PORTH &= ~0x40;
-  //delayMicroseconds(100);
-  //PORTH |= 0x40;
 }
 
 void Pump::setPumpOut() {
   _pumpOut = true;
-}
-
-bool Pump::requestPinchValve() {
-  bool pinchValve = _requestPinchValve;
-  _requestPinchValve = false;
-  return pinchValve;
 }
 
 bool Pump::isRunning() {

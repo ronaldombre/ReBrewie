@@ -19,9 +19,6 @@ class Pump {
     uint16_t pumpFlow();
     bool isRunning();
 
-    bool requestPinchValve();
-    bool requestCloseValve();
-
     volatile uint8_t* pumpTicks;
 
   private:
@@ -41,8 +38,6 @@ class Pump {
     bool _running;
     bool _pumpOut;
     uint8_t _pumpState;
-
-    bool _requestPinchValve;
 
     float _expectedRPM;
     float _expectedCurrent;

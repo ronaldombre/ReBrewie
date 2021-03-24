@@ -1,7 +1,8 @@
-#include "B20Plus.h"
-
 #ifndef Valves_h
 #define Valves_h
+
+#include <Arduino.h>
+#include "B20Plus.h"
 // Valves
 #define VALVE_MASH_IN       0
 #define VALVE_BOIL_RET      1
@@ -15,22 +16,18 @@
 #define VALVE_BOIL_IN       9
 #define VALVE_OPEN_ANGLE    10
 #define VALVE_CLOSE_ANGLE   135
-#define VALVE_PINCH_ANGLE   75
+#define VALVE_PINCH_ANGLE   76
 #define VALVE_OPEN          1
 #define VALVE_CLOSE         0
 
 // Valve structures
-#ifdef  B20
-volatile uint8_t* Valve_Port[10]  = { &PORTA, &PORTA, &PORTJ, &PORTJ, &PORTA, &PORTA, &PORTA, &PORTA, &PORTA, &PORTA };
-uint8_t Valve_Bitmask[10]         = { 0x01,   0x08,   0x02,   0x01,   0x10,   0x20,   0x40,   0x80,   0x02,   0x04 };
-uint8_t valveState[10]            = {    1,      1,      1,      1,      1,      1,      1,      1,      1,      1 };
-#else
-volatile uint8_t* Valve_Port[10]  = { &PORTJ, &PORTJ, &PORTJ, &PORTJ, &PORTA, &PORTA, &PORTA, &PORTA, &PORTA, &PORTC };
-uint8_t Valve_Bitmask[10]         = { 0x04,   0x08,   0x20,   0x40,   0x20,   0x08,   0x80,   0x10,   0x40,   0x02 };
-uint8_t valveState[10]            = {   10,     10,     10,     10,     10,     10,     10,     10,     10,     10 };
-#endif
+extern volatile uint8_t* Valve_Port[10];
+extern uint8_t Valve_Bitmask[10];
+extern uint8_t valveState[10];
 
-uint8_t valvePWM = 0;
-uint8_t valveCount = 0;
+extern uint8_t valvePWM;
+extern uint8_t valveCount;
+
+bool setValve(uint8_t, uint8_t);
 
 #endif
