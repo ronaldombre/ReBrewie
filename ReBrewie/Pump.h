@@ -30,6 +30,7 @@ class Pump {
     uint16_t _pumpCurrent;
     uint16_t _pumpFlow;
     uint8_t _dryRun;
+    uint8_t _cloggedCount;
     bool _pumpDry;
     bool _pumpIsClogged;
     uint16_t _pumpCount;

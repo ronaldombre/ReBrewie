@@ -6,7 +6,7 @@
 class Heater {
   public:
     Heater(uint8_t pinHeater);
-    Heater(uint8_t* pinPort, uint8_t* pinDir, uint8_t pin);
+    Heater(volatile uint8_t* pinPort, volatile uint8_t* pinDir, uint8_t pin);
     void turnOn();
     void turnOff();
     bool isActive();

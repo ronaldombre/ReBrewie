@@ -15,8 +15,8 @@
 #define VALVE_MASH_RET      8
 #define VALVE_BOIL_IN       9
 #define VALVE_OPEN_ANGLE    10
-#define VALVE_CLOSE_ANGLE   135
-#define VALVE_PINCH_ANGLE   76
+#define VALVE_CLOSE_ANGLE   205
+#define VALVE_PINCH_ANGLE   150
 #define VALVE_OPEN          1
 #define VALVE_CLOSE         0
 
@@ -24,6 +24,7 @@
 extern volatile uint8_t* Valve_Port[10];
 extern uint8_t Valve_Bitmask[10];
 extern uint8_t valveState[10];
+extern uint8_t valveError[10];
 
 extern uint8_t valvePWM;
 extern uint8_t valveCount;

@@ -24,6 +24,7 @@ class Brewie {
 
     bool ReadMashError();
     bool ReadBoilError();
+    bool ReadCoolingError();
 
   private:
     void PrintDiagnostics();
@@ -86,6 +87,7 @@ class Brewie {
 
     bool _setBoiling;
     bool _boilCooling;
+    bool _coolingError;
 
     float _maxMashDuty = 1.0;
     float _maxBoilDuty = 1.0;

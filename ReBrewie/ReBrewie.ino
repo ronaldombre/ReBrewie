@@ -9,6 +9,7 @@
 #include "Heater.h"
 #include "Valves.h"
 #include "Pressure.h"
+#include "Notifications.h"
 
 // Brewie Version setup
 #include "B20Plus.h"
@@ -29,11 +30,7 @@ const uint8_t mcuVersion = 7;
 // Brewie Command variables
 char brewieData[120];                  // Raw data from Olimex
 char brewieCommand[24][2];             // Store received information position and length
-char errorMessage[4][5];               // Error message buffer to report back to Olimex
-char brewieMessage[4][5];              // Standard message buffer to report commands to Olimex
 char echoMessage[120];                 // Echo buffer for echoing issued commands back to Olimex
-uint8_t errorCount = 0;                   // Count variables if multiple commands or errors arise
-uint8_t messageCount = 0;
 uint8_t echoCount = 0;
 
 // Flags and indicators
@@ -49,7 +46,6 @@ bool waterFilled = false;
 bool brewing = false;
 bool fanOverride = false;
 bool safetyShutdown = false;
-bool errorOverride = true;
 bool waterOverride = false;
 bool fastWaterReadings = false;
 bool brewieStepRequestFlag = false;
@@ -101,6 +97,7 @@ float acMeasure  = 0;
 float machineVoltage = 0;
 float boardTemp = 0;
 float inlet1A = 0;
+float inlet2A = 0;
 float servosA = 0;
 float boilPumpA = 460;
 float mashPumpA = 480;
@@ -253,11 +250,8 @@ void Brewie_Status_Write() {
   } else {
     brewieLength  = sprintf(statusMessage, "%d\t%u\t%u\t%u\t", currStep, totalTime, stepTime, leftTime);
   }
-  for(uint8_t x = 0; x < messageCount; x++) {
+  for(uint8_t x = 0; x < notificationCount; x++) {
     brewieLength += sprintf(&statusMessage[brewieLength], "%s,", brewieMessage[x]);
-  }
-  for(uint8_t x = 0; x < errorCount; x++) {
-    brewieLength += sprintf(&statusMessage[brewieLength], "%s,", errorMessage[x]);
   }
   brewieLength += sprintf(&statusMessage[brewieLength], "V%d\t", mcuVersion);
   brewieLength += sprintf(&statusMessage[brewieLength], "%u\t", (uint16_t)massSensor);
@@ -394,7 +388,7 @@ void Brewie_Command_Decode() {
         brewiePause = false;
         if (safetyShutdown) {
           // Possible error has occured, let user bypass
-          errorOverride = true;
+          EnableNotifications(false);
           waterOverride = true;
         }
         safetyShutdown = false;
@@ -503,7 +497,9 @@ void Brewie_Step() {
     // Signal that a new step was received from the previous step request
     brewieStepRequestFlag = false;
   } else {
-    Serial.println("Step Buffer Error");
+    if (AddNotification("E300")) {
+      Brewie_Pause();
+    }
   }
 }
 
@@ -522,7 +518,7 @@ void Step_Change() {
         newStep = false;
         Process_Step();
       }
-      errorOverride = false;
+      EnableNotifications(true);
       waterOverride = false;
     } else if (!newStep && !stepActive) {       // Might not be necessary now that I check for this in main loop
       if (brewieStepBuffer[0] == -1) {
@@ -856,19 +852,21 @@ void Process_Temperature() {
       BoilTemp->setWaitForConversion(false);
     }
     if (mashTemp == -127.0) {
-      sprintf(errorMessage[errorCount], "E%d", 115);
-      errorCount++;
+      AddNotification("E115");
+      //sprintf(errorMessage[errorCount], "E%d", 115);
+      //errorCount++;
     }
     if (boilTemp == -127.0) {
-      sprintf(errorMessage[errorCount], "E%d", 116);
-      errorCount++;
+      AddNotification("E116");
+      //sprintf(errorMessage[errorCount], "E%d", 116);
+      //errorCount++;
     }
   }
 }
 
 void Process_Sensors() {
   static uint32_t sensorTime = millis();
-  static uint32_t sensorArray[4] = { 0, 0, 0, 0 };
+  static uint32_t sensorArray[5] = { 0, 0, 0, 0, 0 };
   static uint16_t samples = 0;
   static uint32_t massAve = 0;
   static uint8_t massSamp = 0;
@@ -884,8 +882,9 @@ void Process_Sensors() {
       acMeasure += acCurrent/3600.0*(float)machineVoltage*((float)timeDiff/1000.0);             // Convert back to per sample period basis
       boardTemp = (uint16_t)((((float)analogRead(BOARD_TEMP)*5.0/1023.0)/6.1-0.07)*1000.0);
       inlet1A   = (float)(sensorArray[1]/(float)samples);
-      boilPumpA = (float)(sensorArray[2]/(float)samples);
-      mashPumpA = (float)(sensorArray[3]/(float)samples);
+      inlet2A   = (float)(sensorArray[2]/(float)samples);
+      boilPumpA = (float)(sensorArray[3]/(float)samples);
+      mashPumpA = (float)(sensorArray[4]/(float)samples);
   
       for (uint8_t clr = 0; clr < 4; clr++) {
         sensorArray[clr] = 0;
@@ -915,12 +914,13 @@ void Process_Sensors() {
   sensorArray[0] += acTemp;
   uint16_t tempCurrent = analogRead(I_INLET1);
   cycleCurrent += tempCurrent;
+  sensorArray[1] += tempCurrent;
   tempCurrent = analogRead(I_INLET2);
   cycleCurrent += tempCurrent;
-  sensorArray[1] += tempCurrent;
+  sensorArray[2] += tempCurrent;
   tempCurrent = analogRead(I_BOIL_PUMP);
   cycleCurrent += tempCurrent;
-  sensorArray[2] += tempCurrent;
+  sensorArray[3] += tempCurrent;
   if (tempCurrent > 950) {
     Serial.println("!High Current on Boil Pump");
     boilPump->setPumpSpeed(0);
@@ -931,7 +931,7 @@ void Process_Sensors() {
     mashPump->setPumpSpeed(0);
   }
   cycleCurrent += tempCurrent;
-  sensorArray[3] += tempCurrent;
+  sensorArray[4] += tempCurrent;
   samples++;
 
   if (cycleCurrent > 1800) {
@@ -944,13 +944,10 @@ void Process_Sensors() {
     if (millis() - massTime > 44) {
       massTime = millis();
 
-      if (PressureReadAll(&massFast, &massTemp, massAddress) == 1) {
+      uint8_t errorCode = PressureReadAll(&massFast, &massTemp, massAddress);
+      if (errorCode == 1) {
         massSensor = 0xFFFF;
         TWIInit();
-        if (errorCount == 0) {
-          sprintf(errorMessage[errorCount], "E%d", 118);
-          errorCount++;
-        }
       }
       massTemp = massTemp >> 5;
 
@@ -958,7 +955,7 @@ void Process_Sensors() {
       uint8_t massStatus = (massPlusStatus & 0x03);
       
       // Check status flags for new data or error
-      if (massStatus == 0) {
+      if (massStatus == 0 && errorCode != 1) {
         validMass = true;
         massFast = massFast & 0x3FFF;
         massTempInC = (float)(massTemp - 512)/10.0;
@@ -968,7 +965,11 @@ void Process_Sensors() {
         if (boilTemp > (massTempInC + 5.0)) {
           tempAdjust = massTempInC;
         }
-        massOffset = (int16_t)(((tempAdjust - pressureTempCal)*toLiter)*0.15);
+        if (tempAdjust > 0.0) {
+          massOffset = (int16_t)(((tempAdjust - pressureTempCal)*toLiter)*0.15);
+        } else {
+          massOffset = 0;
+        }
         if (massFast > massOffset) {
           massFast -= massOffset;
         } else {
@@ -1049,9 +1050,9 @@ void Run_Sparge() {
             spargeStep++;
           } else {
             // Too much water error
-            sprintf(&brewieMessage[messageCount][0], "E%d%d", 0, 12);
-            messageCount++;
-            Brewie_Pause();
+            if (AddNotification("E012")) {
+              Brewie_Pause();
+            }
           }
         }
         break;
@@ -1067,9 +1068,9 @@ void Run_Sparge() {
           spargeStep++;
         } else {
           // Too much water error
-          sprintf(&brewieMessage[messageCount][0], "E%d%d", 0, 12);
-          messageCount++;
-          Brewie_Pause();
+          if (AddNotification("E012")) {
+            Brewie_Pause();
+          }
         }
         break;
       case 3:
@@ -1375,9 +1376,9 @@ void Fill_Boil_Tank() {
       case 12:
         // No Inlet
         brewieWaterFill = false;
-        Brewie_Pause();
-        sprintf(&errorMessage[errorCount][0], "E005");
-        errorCount++;
+        if (AddNotification("E005")) {
+          Brewie_Pause();
+        }
         fillStep = 0;
         break;
       case 13: 
@@ -1389,18 +1390,18 @@ void Fill_Boil_Tank() {
         } else {
           safetyShutdown = true;
           brewieWaterFill = false;
-          Brewie_Pause();
-          sprintf(&errorMessage[errorCount][0], "E012");
-          errorCount++;
+          if (AddNotification("E012")) {
+            Brewie_Pause();
+          }
           fillStep = 0;
         }
         break;
       case 14:
         // No Water Detected
         brewieWaterFill = false;
-        Brewie_Pause();
-        sprintf(&errorMessage[errorCount][0], "E011");
-        errorCount++;
+        if (AddNotification("E011")) {
+          Brewie_Pause();
+        }
         fillStep = 0;
         break;
       default:
@@ -1475,22 +1476,20 @@ void Safety_Check() {
     }
   }
   // Turn off boil heater if no water detected
-  if (!errorOverride) {
-    // Empty tank safety
-    if (brewie->BoilHeaterOn()) {
-      // Pressure sensor is too unreliable when pump is running or right after it's turned off
-      if (boilPump->pumpTach() == 0) {
-        if ((float)((massSensor)/toLiter) < 2.0) {
-          safetyCheckCount++;
-        }
-      } else if (boilPump->pumpIsDry()) {
+  // Empty tank safety
+  if (brewie->BoilHeaterOn()) {
+    // Pressure sensor is too unreliable when pump is running or right after it's turned off
+    if (boilPump->pumpTach() == 0) {
+      if ((float)((massSensor)/toLiter) < 2.0) {
         safetyCheckCount++;
       }
+    } else if (boilPump->pumpIsDry()) {
+      safetyCheckCount++;
     }
-    if (brewie->MashHeaterOn()) {
-      if (mashPump->pumpIsDry()) {
-        safetyCheckCount++;
-      }
+  }
+  if (brewie->MashHeaterOn()) {
+    if (mashPump->pumpIsDry()) {
+      safetyCheckCount++;
     }
   }
 
@@ -1505,51 +1504,85 @@ void Safety_Check() {
     digitalWrite(VENT_FAN, LOW);
     digitalWrite(POWER_FAN, LOW);
   }
-
-  // If heaters seem off for more than a second or so, increment counter
-  if (brewie->ReadMashError()) {
-    safetyCheckCount+=6;
-    if (safetyCheckCount > 10) {
-      safetyCheckCount = 0;
-      safetyShutdown = true;
-      sprintf(&errorMessage[errorCount][0], "E%d%d%d", 0, 0, 7);
-      errorCount++;
-    }
-  }
-  if (brewie->ReadBoilError()) {
-    safetyCheckCount+=6;
-    if (safetyCheckCount > 10) {
-      safetyCheckCount = 0;
-      safetyShutdown = true;
-      sprintf(&errorMessage[errorCount][0], "E%d%d%d", 0, 0, 8);
-      errorCount++;
-    }
-  }
   
   if (safetyCheckCount > 1) {
     Serial.print("Safety Check Count: ");
     Serial.println(safetyCheckCount);
   }
-
-  if (mashPump->pumpIsClogged()) {
-    if (errorCount == 0) {
-      sprintf(&errorMessage[errorCount][0], "E%d%d%d", 0, 0, 9);
-      errorCount++;
-    }
-  }
-  if (boilPump->pumpIsClogged()) {
-    if (errorCount == 0) {
-      sprintf(&errorMessage[errorCount][0], "E%d%d%d", 0, 1, 0);
-      errorCount++;
-    }
-  }
   
   // If error message happens at same time as next step, no message will appear on GUI at all!
-  if (safetyShutdown && !brewiePause && !errorOverride) {
-    Brewie_Pause();
-    if (errorCount == 0) {
-      sprintf(&errorMessage[errorCount][0], "E%d%d%d", 0, 2, 0);
-      errorCount++;
+  if (safetyShutdown && !brewiePause) {
+    if (AddNotification("E020")) {
+        Brewie_Pause();
+      }
+  } else if (!brewiePause) {
+    if (mashPump->pumpIsClogged()) {
+      if (AddNotification("E009")) {
+        Brewie_Pause();
+      }
+    }
+    if (boilPump->pumpIsClogged()) {
+      if (AddNotification("E010")) {
+        Brewie_Pause();
+      }
+    }
+    for (uint8_t count = 0; count<10; count++) {
+      if (valveError[count] == 1) {
+        char errorMessage[5];
+        sprintf(errorMessage, "E20%i", count);
+        if (AddNotification(errorMessage)) {
+          Brewie_Pause();
+        }
+        //errorCount++;
+        valveError[count]++;
+        break;
+      }
+    }
+
+    if (massSensor == 65535) {
+      AddNotification("E118");
+    }
+  
+    // Safety control for extremely long times
+    if (totalTime > 60000) {
+      totalTime = 59999;
+      if (AddNotification("E301")) {
+        Brewie_Pause();
+      }
+    }
+    if (stepTime > 7200 && brewieStep[STEP_PRIMARY] != 6) {
+      if (AddNotification("E302")) {
+        Brewie_Pause();
+      }
+    }
+
+    // If heaters seem off for more than a second or so, increment counter
+    if (brewie->ReadMashError()) {
+      safetyCheckCount+=6;
+      if (safetyCheckCount > 10) {
+        safetyCheckCount = 0;
+        safetyShutdown = true;
+        if (AddNotification("E007")) {
+          Brewie_Pause();
+        }
+      }
+    }
+    if (brewie->ReadBoilError()) {
+      safetyCheckCount+=6;
+      if (safetyCheckCount > 10) {
+        safetyCheckCount = 0;
+        safetyShutdown = true;
+        if (AddNotification("E008")) {
+          Brewie_Pause();
+        }
+      }
+    }
+    if (brewie->ReadCoolingError()) {
+      safetyCheckCount = 0;
+      safetyShutdown = true;
+      if (AddNotification("E006")) {
+        Brewie_Pause();
+      }
     }
   }
 }
@@ -1575,29 +1608,21 @@ void Brewie_Status() {
         if (leftTime >= extraTime) {
           leftTime -= extraTime;
         }
-
-        // Safety control for extremely long times
-        if (totalTime > 60000) {
-          totalTime = 59999;
-          Brewie_Pause();
-        }
-        if (stepTime > 30000) {
-          stepTime = 29999;
-          Brewie_Pause();
-        }
       } else {
         currStep = -2;
       }
     }
     
     if (powerButton) {
-      sprintf(brewieMessage[messageCount], "P%d", 999);
-      messageCount++;
+      AddNotification("P999");
+      //sprintf(brewieMessage[messageCount], "P999");
+      //messageCount++;
       powerButton = false;
     }
     if (drainButton) {
-      sprintf(brewieMessage[messageCount], "P%d", 998);
-      messageCount++;
+      AddNotification("P998");
+      //sprintf(brewieMessage[messageCount], "P998");
+      //messageCount++;
       drainButton = false;
     }
 
@@ -1638,8 +1663,9 @@ void Brewie_Status() {
             lastStep = false;
           } else {
             brewieStepRequestFlag = true;
-            sprintf(&brewieMessage[messageCount][0], "P%d", 103);
-            messageCount++;
+            AddNotification("P103");
+            //sprintf(&brewieMessage[messageCount][0], "P%d", 103);
+            //messageCount++;
             // Add remaining time to keep total time "accurate"
             totalTime += leftTime;
             stepTime = 0;
@@ -1694,13 +1720,9 @@ void Brewie_Status() {
     Brewie_Status_Write();
    
     // Reset status strings and counts
-    brewieMessage[0][0] = 0;
-    errorMessage[0][0] = 0;
+    ClearNotifications();
     echoCount = 0;
     newCommand = false;
-  
-    messageCount = 0;
-    errorCount = 0;
   }
 }
 
@@ -1714,8 +1736,9 @@ void Initialize_2560() {
   PORTE |= 0xC8;
   DDRH &= ~0x3F;
   PORTH |= 0x3F;
-  DDRB &= ~0x09;
-  PORTB |= 0x09;
+  DDRB &= ~0x08;
+  DDRB |= 0xF1;
+  PORTB = 0x08;
   DDRG &= ~0x1C;
   PORTG |= 0x1C;
   DDRL &= ~0xDF;
@@ -1730,10 +1753,10 @@ void Initialize_2560() {
   PORTF |= 0xF8;
   
   // Set up Timer 4 for Servos
-  TCCR4A = 0;//_BV(WGM41);
-  TCCR4B = _BV(WGM43) |  _BV(CS41); 
-  ICR4 = 20000;
-  OCR4A = 1000;
+  TCCR4A = _BV(WGM41);
+  TCCR4B = _BV(WGM43) | _BV(WGM42) | _BV(CS41); 
+  ICR4 = 40000;
+  OCR4A = 2000;
   //TIMSK4 |= _BV(TOIE4) + _BV(OCIE4A);
   // Set up Valve pins + Inlets
   DDRJ |= 0x7C;
@@ -1768,14 +1791,14 @@ void Initialize_2560() {
   digitalWrite(PWR_EN_SERVO, LOW);
   
   // Power Enable 12V
-  DDRH |= 0x80;
+  //DDRH |= 0x80;
   pinMode(PWR_EN_5V, OUTPUT);
   pinMode(PWR_EN_ARM, OUTPUT);
-  
   digitalWrite(PWR_EN_5V, LOW);
+  
   pinMode(MASH_PUMP_TACH, INPUT_PULLUP);
   pinMode(BOIL_PUMP_TACH, INPUT_PULLUP);
-  SPI.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0));
+  SPI.beginTransaction(SPISettings(250000, MSBFIRST, SPI_MODE0));
   SPI.endTransaction();
   
   pinMode(POWER_BUTTON, INPUT);
@@ -1807,7 +1830,10 @@ void Initialize_2560() {
   mashPump->pumpTicks = &mashTicks;
   boilPump->pumpTicks = &boilTicks;
 
+  ADCSRA = 0x86;
+
   Brewie_Reset();
+  PORTB &= ~0x11;
 }
 
 void Brewie_Reset() {
@@ -1822,8 +1848,6 @@ void Brewie_Reset() {
   brewieWaterFill = false;
   spargeOverride = false;
   safetyShutdown = false;
-  errorOverride = false;
-  //fanOverride = false;
   stepActive = false;
   requestNextStep = false;
   brewieStepRequestFlag = false;
@@ -1836,24 +1860,30 @@ void Brewie_Reset() {
 }
 
 void Power_On() {
-  digitalWrite(POWER_LIGHT, HIGH);
-  //PORTH |= 0x80;
-  //delay(1);
-  //digitalWrite(PWR_EN_5V, LOW);
-  for (uint8_t x = 0; x<25;x++) {
-    //digitalWrite(PWR_EN_ARM, HIGH);
-    PORTB |= 0x40;
-    delayMicroseconds(1);
-    //digitalWrite(PWR_EN_ARM, LOW);
-    PORTB &= ~0x40;
-    delayMicroseconds(20);
-  }
-  digitalWrite(PWR_EN_ARM, HIGH);
-  delay(400);
-  PORTH |= 0x80;
+  PORTB = 0;
   delay(100);
+  /*PORTB |= 0x01;
+  delay(100);
+  PORTB |= 0x03;
+  delay(100);
+  PORTB |= 0x05;
+  delay(100);
+  PORTB |= 0x07;
+  delay(100);
+  PORTB |= 0x0F;*/
+  digitalWrite(POWER_LIGHT, HIGH);
+  PORTH |= 0x80;
+  delay(200);
+  digitalWrite(PWR_EN_5V, HIGH);
+  delay(200);
+  PORTB |= 0x01;
+  delay(200);
+  digitalWrite(PWR_EN_5V, LOW);
+  PORTB &= ~0x01;
+  digitalWrite(PWR_EN_ARM, HIGH);
+  delay(500);
   //digitalWrite(PWR_EN_5V, HIGH);
-  //Close_All_Valves();
+  Close_All_Valves();
   powerOn = true;
   TIMSK5 |= _BV(TOIE5) + _BV(OCIE5C);
 }
@@ -1882,6 +1912,7 @@ void Power_Off() {
   TIMSK5 &= ~(_BV(TOIE5) + _BV(OCIE5C));
   digitalWrite(LED1, LOW);
   digitalWrite(LED2, LOW);
+  PORTB &= ~0x11;
 }
 
 void Brewie_Pause() {
@@ -1914,7 +1945,6 @@ ISR(TIMER5_COMPC_vect){
 }
 
 ISR(TIMER5_OVF_vect){
-  cli();
   //PORTL |= 0x20;
   PORTF |= 0x02;
   if (OCR5A == 1) {
@@ -1928,7 +1958,6 @@ ISR(TIMER5_OVF_vect){
       OCR5A = 1;
     }
   }
-  sei();
 }
 
 // Tachometer Interrupts

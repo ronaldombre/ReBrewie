@@ -72,6 +72,7 @@ void Brewie::Reset() {
   _boilTempAverageLast = 0;
   _boilingCount = 0;
   _boilDetect = false;
+  _coolingError = false;
   setTemperatures(0,0);
 }
 
@@ -149,9 +150,13 @@ void Brewie::Temperature_Control() {
           _boilingCount--;
         }
         _boilTempReached = false;
+        if (_boilTempDelta > -.50 && *_boilTemp > 35.0) {
+          _boilingCount += 3;
+        }
       }
       if (_boilingCount >= 9) {
         _boilTempReached = true;
+        _coolingError = true;
       }
     } else {
       if (_mashSetTemp-*_mashTemp <= 0.25 && _mashTempDelta <= 0.25 && _mashHeatSet) {
@@ -373,6 +378,7 @@ bool Brewie::BoilTempReached() {
 
 void Brewie::SetCooling() {
   _boilCooling = true;
+  _coolingError = false;
 }
 
 void Brewie::SetHeating() {
@@ -396,6 +402,12 @@ bool Brewie::ReadMashError() {
 bool Brewie::ReadBoilError() {
   bool error = _boilError;
   _boilError = false;
+  return error;
+}
+
+bool Brewie::ReadCoolingError() {
+  bool error = _coolingError;
+  _coolingError = false;
   return error;
 }
 

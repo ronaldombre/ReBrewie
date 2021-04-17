@@ -10,7 +10,7 @@ Heater::Heater(uint8_t pinHeater) {
   *_heatPort &= ~_heatMask;
 }
 
-Heater::Heater(uint8_t* pinPort, uint8_t* pinDir, uint8_t pin) {
+Heater::Heater(volatile uint8_t* pinPort, volatile uint8_t* pinDir, uint8_t pin) {
   _heatPort = pinPort;
   _heatMask = (1 << pin);
   _heatDir = pinDir;
