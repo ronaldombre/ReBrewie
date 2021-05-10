@@ -8,7 +8,7 @@ class Pump {
   public:
     Pump(uint8_t pin, bool channel);
     void Pump_Speed_Control(uint16_t current);
-    void setPumpSpeed(uint16_t pumpSpeed);
+    void setPumpSpeed(uint8_t pumpSpeed);
     void writeDAC();
     void setPumpOut();
     uint8_t pumpTach();
@@ -22,10 +22,14 @@ class Pump {
     volatile uint8_t* pumpTicks;
 
   private:
+    void _setPumpSpeed();
+    void _stopPump();
+    
     uint8_t _pumpPin;
     bool _pumpChannel;
     uint8_t _pumpTach;
     uint8_t _pumpSpeed;
+    uint8_t _pumpSpeedRestart;
     uint8_t _pumpDiag;
     uint16_t _pumpCurrent;
     uint16_t _pumpFlow;
@@ -34,7 +38,6 @@ class Pump {
     bool _pumpDry;
     bool _pumpIsClogged;
     uint16_t _pumpCount;
-    uint8_t _pumpTries;
     bool _pumpEnable;
     bool _running;
     bool _pumpOut;

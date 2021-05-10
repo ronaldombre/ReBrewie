@@ -10,6 +10,7 @@ class Brewie {
     void Temperature_Average();
     void Temperature_Control();
     void Control_Calculation();
+    void Cooling_Calculation();
     bool MashHeaterOn();
     bool BoilHeaterOn();
     bool MashTempReached();
@@ -47,12 +48,14 @@ class Brewie {
     bool _boilHeatSet;
     bool _mashHeaterEnable;
     bool _boilHeaterEnable;
+    bool _boilCoolingEnable;
     float _mashHeaterEnergy;
     float _boilHeaterEnergy;
     float _lastEnergy;
 
     int32_t _mashHeaterControl;
     int32_t _boilHeaterControl;
+    int32_t _boilCoolingControl;
     int32_t _heaterControlTime;
     float _mashIntegralError;
     float _boilIntegralError;

@@ -27,8 +27,9 @@ void Pump::Pump_Speed_Control(uint16_t current) {
   if (_pumpEnable) {
     switch(_pumpState) {
       case 0: // Running
-        if (_pumpCount++ > 4) {
+        if (_pumpCount++ > 3) {
           _pumpDiag = 1;
+
           if (_pumpTach == 0) {
             _cloggedCount++;
             if (_cloggedCount > 4) {
@@ -54,10 +55,6 @@ void Pump::Pump_Speed_Control(uint16_t current) {
           _pumpDiag = 2;
           if (_dryRun > 15  && !_pumpDry) {
             _pumpState++;
-            _pumpDiag = 0;
-            _pumpSpeed = 0;
-            writeDAC();
-            _running = false;
             _pumpCount = 0;
           }
         }
@@ -72,18 +69,21 @@ void Pump::Pump_Speed_Control(uint16_t current) {
           _pumpState++;
         } else {
           _pumpDry = true;
-          _pumpState = 0;
+          _pumpState = 4;
         }
+        _stopPump();
+        _pumpCount = 0;
         break;
       case 2: // Pump again to remove every drop of water
         if (_pumpCount++ > 4) {
-          setPumpSpeed(110);
+          _pumpSpeedRestart = 110;
+          _setPumpSpeed();
           _pumpState++;
           _pumpCount = 0;
           _dryRun = 0;
         } else if (_pumpCount > 1) {
-          setValve(VALVE_BOIL_RET, VALVE_PINCH_ANGLE);
-          setValve(VALVE_MASH_RET, VALVE_CLOSE);
+          //setValve(VALVE_BOIL_RET, VALVE_PINCH_ANGLE);
+          //setValve(VALVE_MASH_RET, VALVE_CLOSE);
         }
         break;
       case 3: // Stop pumping
@@ -107,6 +107,33 @@ void Pump::Pump_Speed_Control(uint16_t current) {
           }
         }
         break;
+      case 4: // Restart pump
+        if (_pumpCount++ > 3) {
+          _setPumpSpeed();
+          _pumpState = 5;
+        }
+        break;
+      case 5: // Restart monitor, quicker dry detection
+        if (_pumpCount++ > 0) {
+          if (_pumpCurrent < (_expectedCurrent*.7)) {
+            // Pump may be running dry
+            _pumpDiag = 3;
+            _dryRun++;
+            if (_pumpCurrent < 35) {
+              // Not on? Resend DAC value
+              writeDAC();
+            }
+          } else {
+            if (_dryRun > 0) {
+              _dryRun--;
+            }
+          }
+          if (_dryRun > 3) {
+            _stopPump();
+            _pumpState = 4;
+          }
+        }
+        break;
       default: 
         _pumpState = 0;
         break;
@@ -118,17 +145,19 @@ void Pump::Pump_Speed_Control(uint16_t current) {
   }
 }
 
-void Pump::setPumpSpeed(uint16_t pumpSpeed) {
+void Pump::setPumpSpeed(uint8_t pumpSpeed) {
   if (pumpSpeed > 220) {
     pumpSpeed = 220;
   }
   _pumpSpeed = pumpSpeed;
   _pumpCount = 0;
+  _pumpState = 0;
   writeDAC();
   _pumpIsClogged = false;
   _cloggedCount = 0;
+  _dryRun = 0;
+  _pumpDry = false;
   if (_pumpSpeed == 0) {
-    _dryRun = 0;
     _running = false;
     _pumpDiag = 0;
     _pumpEnable = false;
@@ -139,9 +168,41 @@ void Pump::setPumpSpeed(uint16_t pumpSpeed) {
     _pumpDiag = 255;
     digitalWrite(_pumpPin, HIGH);
     _pumpEnable = true;
-    _pumpDry = false;
-    _pumpTries = 0;
+    _pumpSpeedRestart = _pumpSpeed;
   }
+}
+
+void Pump::_setPumpSpeed() {
+  _pumpSpeed = _pumpSpeedRestart;
+  _pumpCount = 0;
+  writeDAC();
+  _pumpIsClogged = false;
+  _cloggedCount = 0;
+  _dryRun = 0;
+  _pumpDry = false;
+  if (_pumpSpeed == 0) {
+    _running = false;
+    _pumpDiag = 0;
+    _pumpEnable = false;
+    //digitalWrite(_pumpPin, LOW);
+  } else {
+    _running = true;
+    _pumpDiag = 255;
+    digitalWrite(_pumpPin, HIGH);
+    _pumpEnable = true;
+  }
+}
+
+void Pump::_stopPump() {
+  _pumpSpeed = 0;
+  _pumpCount = 0;
+  writeDAC();
+  _pumpIsClogged = false;
+  _cloggedCount = 0;
+  _dryRun = 0;
+  _pumpDry = false;
+  _running = false;
+  _pumpDiag = 0;
 }
 
 void Pump::writeDAC() {

@@ -1,3 +1,4 @@
+
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <SPI.h>
@@ -16,14 +17,7 @@
 //#include "B20.h"
 
 // Global Configurations
-const bool externalCooling = false;       // Sets the cooling step to run wort out the outlet to an external wort chiller, otherwise default chill setup
-const bool trueSparge = false;            // If set, dump mash liquor into external container before sparging with pure water (increase extraction). Manually return to boil tank
-bool whirlpoolStep = false;               // If set (cooling temp > 70C), whirlpool for set time before cooling down to ~20C
-const uint16_t whirlpoolCoolTemp = 200;   // Cool temperature after a whirlpool step, temp in C x 10
-const uint16_t whirlpoolTime = 1800;      // Default whirlpool time: 30 minutes
 const uint8_t spargePumpSpeed = 100;      // Reduce sparging pumping speed
-const uint8_t mashingPumpSpeed = 70;      // Mashing pump speed for timed steps
-const uint8_t heatingPumpSpeed = 120;     // Mashing pump speed for heating steps
 
 const uint8_t mcuVersion = 7;
 
@@ -150,12 +144,6 @@ void loop() {
     }
   } else {
     if (digitalRead(POWER_BUTTON) == HIGH) {
-      if (drainButton) {
-        // Set whirlpool mode
-        //whirlpoolStep = true;
-      } else {
-        //whirlpoolStep = false;
-      }
       Power_On();
     }
     Brewie_Read();
@@ -277,7 +265,7 @@ void Brewie_Status_Write() {
   floatTemp = acMeasure;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   brewieLength += sprintf(&statusMessage[brewieLength], "\t");
-  floatTemp = massTempInC;
+  floatTemp = inlet1A;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   brewieLength += sprintf(&statusMessage[brewieLength], "\t%d", massOffset);
 
@@ -535,6 +523,8 @@ void Process_Step() {
 
   float mashSetTemp = (float)brewieStep[STEP_MASH_TEMP]/10.0;
   float boilSetTemp = (float)brewieStep[STEP_BOIL_TEMP]/10.0;
+  
+  brewie->SetHeating();
 
   digitalWrite(INLET_1, LOW);
   digitalWrite(INLET_2, LOW);
@@ -552,11 +542,6 @@ void Process_Step() {
     case 2: // Mash Temp
       break;
     case 3: // Boil Temp
-      if (brewieStep[STEP_BOIL_PUMP] == 0) {
-        brewieStep[STEP_BOIL_PUMP] = 120;
-        brewieStep[STEP_BOIL_INLET] = 1;
-        brewieStep[STEP_BOIL_RETURN] = 1;
-      }
       break;
     case 4: // Mash Pump Empty
       mashPump->setPumpOut();
@@ -566,20 +551,12 @@ void Process_Step() {
       break;
     case 6: // Run for time
       // If boil step, circulate to prevent scorching
-      if (brewieStep[STEP_BOIL_TEMP] == 930) {
-        brewieStep[STEP_BOIL_PUMP] = 100;
-        brewieStep[STEP_BOIL_INLET] = 1;
-        brewieStep[STEP_BOIL_RETURN] = 1;
-      }
       if (brewieStep[STEP_TIME] == 0) {
         zeroTimeStep = true;
       }
       break;
     case 7: // Hard Boil
       // Circulate to prevent scorching
-      brewieStep[STEP_BOIL_PUMP] = 120;
-      brewieStep[STEP_BOIL_INLET] = 1;
-      brewieStep[STEP_BOIL_RETURN] = 1;
       brewieStep[STEP_BOIL_TEMP] = 1000;
       boilSetTemp = ((float)brewieStep[STEP_BOIL_TEMP])/10.0;
       break;
@@ -592,19 +569,7 @@ void Process_Step() {
     case 9: // Might not exist
       break;
     case 10: // Cool Step/Unclogging step
-      if ((float)brewieStep[STEP_BOIL_TEMP]/10.0 < 70.0) {
-        brewie->SetCooling();
-      } else {
-        whirlpoolStep = true;
-      }
-      // Choose internal or external cooling
-      if (externalCooling == true) {
-        brewieStep[STEP_COOL_VALVE] = 0;
-        brewieStep[STEP_OUTLET] = 1;
-        brewieStep[STEP_BOIL_RETURN] = 1;
-      } else {
-        digitalWrite(INLET_2, HIGH);
-      }
+      brewie->SetCooling();
       break;
     default: 
       break;
@@ -615,7 +580,6 @@ void Process_Step() {
     case 1: // Unknown!
       break;
     case 2: // Sparge and Water Calibration (Same as P205?)
-    {
       if (brewieStep[STEP_MASH_PUMP] > 0) {
         spargeOverride = true;
         // Override sparge valve and pump settings since they change on their own
@@ -627,25 +591,13 @@ void Process_Step() {
         brewieStep[STEP_BOIL_INLET] = 0;
       }
       break;
-    }
     case 3: // Hop Additions (the valve dance?)
-    {
-      uint8_t hopTanks = brewieStep[STEP_HOP_1] + brewieStep[STEP_HOP_2] + brewieStep[STEP_HOP_3] + brewieStep[STEP_HOP_4];
-      if (hopTanks == 0) {
-        // False alarm, just a delayed hop step
-        brewieStep[STEP_BOIL_PUMP] = 120;
-        brewieStep[STEP_BOIL_INLET] = 1;
-      } else {
-        brewieStep[STEP_BOIL_PUMP] = 30 + (50*hopTanks);
-      }
-      brewieStep[STEP_BOIL_RETURN] = 1;
       brewieStep[STEP_BOIL_TEMP] = 1000;
       boilSetTemp = ((float)brewieStep[STEP_BOIL_TEMP])/10.0;
       if (zeroTimeStep) {
         boilPump->setPumpSpeed(40);
       }
       break;
-    }
     case 4: //  Enable water inlet with no water quantity specified
       if (brewieStep[STEP_WATER_INLET] == 1) {
         digitalWrite(INLET_1, HIGH);
@@ -663,24 +615,6 @@ void Process_Step() {
       break;
     default: 
       break;
-  }
-
-  // Pumps
-  // Mash Pump speed override, to slow it down for mashing
-  if (brewieStep[STEP_MASH_PUMP] > 0) {
-    if (brewieStep[STEP_MASH_INLET] == 0) {
-      brewieStep[STEP_MASH_PUMP] = 255;
-    } else if (brewieStep[STEP_MASH_INLET] == 1 && brewieStep[STEP_BOIL_INLET] == 1) {
-      brewieStep[STEP_MASH_PUMP] = 255;
-    } else if (brewieStep[STEP_PRIMARY] == 2) {
-      // Mashing Pump Speed getting to Temp
-      brewieStep[STEP_MASH_PUMP] = heatingPumpSpeed;
-      brewie->SetMashMaxDuty(1.0);
-    } else {
-      // Mashing Pump Speed
-      brewieStep[STEP_MASH_PUMP] = mashingPumpSpeed;
-      brewie->SetMashMaxDuty(0.5);
-    }
   }
 
   // Turn off pumps during valve setup
@@ -766,23 +700,16 @@ bool Step_Complete() {
           if (leftTime == 0) {
             stepActive = false;
             spargeOverride = false;
-            // Check for added whirlpool step
-            if (whirlpoolStep) {
-              // Restore cooling step
-              brewieStep[STEP_PRIMARY] = 10;
-              brewieStep[STEP_TIME] = whirlpoolTime;
-              brewieStep[STEP_BOIL_INLET] = 0;
-              brewieStep[STEP_OUTLET] = 0;
-              brewieStep[STEP_COOL_VALVE] = 1;
-              brewieStep[STEP_BOIL_TEMP] = whirlpoolCoolTemp;
-              Process_Step();
-              whirlpoolStep = false;
-            }
           }
           break;
         case 7: // Something to do with total boil time? Force boil? No boil over?
           if (brewie->BoilTempReached()) {
-            stepActive = false;
+            if (brewieStep[STEP_BOIL_TEMP] > 990) {
+              stepActive = false;
+            } else {
+              brewieStep[STEP_BOIL_TEMP] = 990;
+              brewie->setTemperatures(0, ((float)brewieStep[STEP_BOIL_TEMP])/10.0);
+            }
           }
           break;
         case 8: // User Interaction
@@ -797,19 +724,7 @@ bool Step_Complete() {
           break;
         case 10: // Cooling
           if (brewie->BoilTempReached()) {
-            if (whirlpoolStep) {
-              // Hijack step
-              brewieStep[STEP_PRIMARY] = 6;
-              brewieStep[STEP_TIME] = whirlpoolTime;
-              brewieStep[STEP_BOIL_INLET] = 1;
-              brewieStep[STEP_OUTLET] = 0;
-              brewieStep[STEP_COOL_VALVE] = 0;
-              Process_Step();
-            } else {
-              stepActive = false;
-            }
-            brewie->SetHeating();
-            digitalWrite(INLET_2, LOW);
+            stepActive = false;
           }
           break;
       }
@@ -852,14 +767,14 @@ void Process_Temperature() {
       BoilTemp->setWaitForConversion(false);
     }
     if (mashTemp == -127.0) {
-      AddNotification("E115");
-      //sprintf(errorMessage[errorCount], "E%d", 115);
-      //errorCount++;
+      if (AddNotification("E115")) {
+        Brewie_Pause();
+      }
     }
     if (boilTemp == -127.0) {
-      AddNotification("E116");
-      //sprintf(errorMessage[errorCount], "E%d", 116);
-      //errorCount++;
+      if (AddNotification("E116")) {
+        Brewie_Pause();
+      }
     }
   }
 }
@@ -886,7 +801,7 @@ void Process_Sensors() {
       boilPumpA = (float)(sensorArray[3]/(float)samples);
       mashPumpA = (float)(sensorArray[4]/(float)samples);
   
-      for (uint8_t clr = 0; clr < 4; clr++) {
+      for (uint8_t clr = 0; clr < 5; clr++) {
         sensorArray[clr] = 0;
       }
       
@@ -921,22 +836,22 @@ void Process_Sensors() {
   tempCurrent = analogRead(I_BOIL_PUMP);
   cycleCurrent += tempCurrent;
   sensorArray[3] += tempCurrent;
-  if (tempCurrent > 950) {
+  /*if (tempCurrent > 950) {
     Serial.println("!High Current on Boil Pump");
     boilPump->setPumpSpeed(0);
-  }
+  }*/
   tempCurrent = analogRead(I_MASH_PUMP);
-  if (tempCurrent > 950) {
+  /*if (tempCurrent > 950) {
     Serial.println("!High Current on Mash Pump");
     mashPump->setPumpSpeed(0);
-  }
+  }*/
   cycleCurrent += tempCurrent;
   sensorArray[4] += tempCurrent;
   samples++;
 
-  if (cycleCurrent > 1800) {
+  /*if (cycleCurrent > 1800) {
     Serial.println("!Power brownout imminent!");
-  }
+  }*/
 
   // Pressure sensor seems to take > 100ms to take a reading
   // Process I2C Weight/Pressure Sensors
@@ -1437,7 +1352,9 @@ void Safety_Check() {
   // Overcurrent check
   if (acCurrent > currentLimit) {
     // Shut down heaters immediately
-    safetyShutdown = true;
+    if (AddNotification("E210")) {
+      Brewie_Pause();
+    }
   } else if (acCurrent < 1.0) {
     // Heater undercurrent check (should be ~10-12 for 120V, 7-10 for 240V)
     if (brewie->MashHeaterOn()) {
@@ -1484,12 +1401,16 @@ void Safety_Check() {
         safetyCheckCount++;
       }
     } else if (boilPump->pumpIsDry()) {
-      safetyCheckCount++;
+      if (AddNotification("E221")) {
+        Brewie_Pause();
+      }
     }
   }
   if (brewie->MashHeaterOn()) {
     if (mashPump->pumpIsDry()) {
-      safetyCheckCount++;
+      if (AddNotification("E220")) {
+        Brewie_Pause();
+      }
     }
   }
 
@@ -1505,17 +1426,8 @@ void Safety_Check() {
     digitalWrite(POWER_FAN, LOW);
   }
   
-  if (safetyCheckCount > 1) {
-    Serial.print("Safety Check Count: ");
-    Serial.println(safetyCheckCount);
-  }
-  
   // If error message happens at same time as next step, no message will appear on GUI at all!
-  if (safetyShutdown && !brewiePause) {
-    if (AddNotification("E020")) {
-        Brewie_Pause();
-      }
-  } else if (!brewiePause) {
+  if (!brewiePause) {
     if (mashPump->pumpIsClogged()) {
       if (AddNotification("E009")) {
         Brewie_Pause();
@@ -1540,7 +1452,9 @@ void Safety_Check() {
     }
 
     if (massSensor == 65535) {
-      AddNotification("E118");
+      if (AddNotification("E118")) {
+        Brewie_Pause();
+      }
     }
   
     // Safety control for extremely long times
@@ -1633,12 +1547,14 @@ void Brewie_Status() {
     boilPump->Pump_Speed_Control((uint16_t)boilPumpA);
 
     // Water Inlet functionality - Prevent Overflows
-    if (brewieStep[STEP_SECONDARY] == 4) {
-      if (massSensor/toLiter > 10.0) {
-        digitalWrite(INLET_1, LOW);
-      } else if (massSensor/toLiter < 5.0) {
-        if (brewieStep[STEP_WATER_INLET] == 1) {
-          digitalWrite(INLET_1, HIGH);
+    if (brewing) {
+      if (brewieStep[STEP_SECONDARY] == 4) {
+        if (massSensor/toLiter > 10.0) {
+          digitalWrite(INLET_1, LOW);
+        } else if (massSensor/toLiter < 5.0) {
+          if (brewieStep[STEP_WATER_INLET] == 1) {
+            digitalWrite(INLET_1, HIGH);
+          }
         }
       }
     }
@@ -1736,15 +1652,14 @@ void Initialize_2560() {
   PORTE |= 0xC8;
   DDRH &= ~0x3F;
   PORTH |= 0x3F;
-  DDRB &= ~0x08;
-  DDRB |= 0xF1;
+  DDRB |= 0xF7;
   PORTB = 0x08;
   DDRG &= ~0x1C;
   PORTG |= 0x1C;
   DDRL &= ~0xDF;
   PORTL |= 0xDF;
-  DDRD &= ~0x48;
-  PORTD |= 0x48;
+  DDRD &= 0x03;
+  PORTD |= 0x48;//0x20 and 0x10 causing a bleed?
   DDRC &= ~0x55;
   PORTC |= 0x55;
   DDRJ &= ~0x83;
@@ -1783,7 +1698,7 @@ void Initialize_2560() {
   pinMode(SPEED_CTRL_LDAC, OUTPUT);
   pinMode(SPEED_CTRL_CS, OUTPUT);
   digitalWrite(SPEED_CTRL_LDAC, LOW);  // ~LDAC (Leave low to have output latch at end of SPI transfer)
-  digitalWrite(SPEED_CTRL_CS, HIGH); // DAC ~CS
+  digitalWrite(SPEED_CTRL_CS, LOW); // DAC ~CS
   pinMode(50, INPUT);   //MISO, DAC doesn't send any data though
   pinMode(53, OUTPUT);  //Main ~CS, needs to be output for SPI to work
 
@@ -1794,6 +1709,7 @@ void Initialize_2560() {
   //DDRH |= 0x80;
   pinMode(PWR_EN_5V, OUTPUT);
   pinMode(PWR_EN_ARM, OUTPUT);
+  //pinMode(PWR_12V_SENSE, INPUT);
   digitalWrite(PWR_EN_5V, LOW);
   
   pinMode(MASH_PUMP_TACH, INPUT_PULLUP);
@@ -1806,9 +1722,11 @@ void Initialize_2560() {
   pinMode(POWER_LIGHT, OUTPUT);
   pinMode(DRAIN_LIGHT, OUTPUT);
   digitalWrite(POWER_LIGHT, LOW);
-  digitalWrite(DRAIN_LIGHT, LOW); 
+  digitalWrite(DRAIN_LIGHT, LOW);
   
   Serial.begin(115200);
+  DDRE |= 0x02;
+  PORTE &= ~0x02;
 
   TWIInit();
 
@@ -1833,7 +1751,10 @@ void Initialize_2560() {
   ADCSRA = 0x86;
 
   Brewie_Reset();
-  PORTB &= ~0x11;
+  PORTB = 0;
+  PORTJ = 0;
+  DDRE |= 0x02;
+  PORTE &= ~0x02;
 }
 
 void Brewie_Reset() {
@@ -1860,32 +1781,18 @@ void Brewie_Reset() {
 }
 
 void Power_On() {
-  PORTB = 0;
-  delay(100);
-  /*PORTB |= 0x01;
-  delay(100);
-  PORTB |= 0x03;
-  delay(100);
-  PORTB |= 0x05;
-  delay(100);
-  PORTB |= 0x07;
-  delay(100);
-  PORTB |= 0x0F;*/
   digitalWrite(POWER_LIGHT, HIGH);
   PORTH |= 0x80;
   delay(200);
   digitalWrite(PWR_EN_5V, HIGH);
   delay(200);
-  PORTB |= 0x01;
-  delay(200);
   digitalWrite(PWR_EN_5V, LOW);
-  PORTB &= ~0x01;
   digitalWrite(PWR_EN_ARM, HIGH);
   delay(500);
-  //digitalWrite(PWR_EN_5V, HIGH);
   Close_All_Valves();
   powerOn = true;
   TIMSK5 |= _BV(TOIE5) + _BV(OCIE5C);
+  DDRE &= ~0x02;
 }
 
 void Power_Off() {
@@ -1913,6 +1820,8 @@ void Power_Off() {
   digitalWrite(LED1, LOW);
   digitalWrite(LED2, LOW);
   PORTB &= ~0x11;
+  DDRE |= 0x02;
+  PORTE &= ~0x02;
 }
 
 void Brewie_Pause() {

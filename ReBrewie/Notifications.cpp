@@ -8,7 +8,11 @@ bool AddNotification(char message[5]) {
   //String test = &message[1];
   //test.toInt();
   bool added = false;
-  if (notificationCount < 3 && notificationsEnabled) {
+  if (message[0] == 'P' && notificationCount < 4) {
+    sprintf(brewieMessage[notificationCount], message);
+    notificationCount++;
+    added = true;
+  } else if (notificationCount < 3 && notificationsEnabled) {
     sprintf(brewieMessage[notificationCount], message);
     notificationCount++;
     added = true;

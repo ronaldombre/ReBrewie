@@ -45,7 +45,7 @@ bool setValve(uint8_t valve, uint8_t angle) {
       valveSamples++;
     }
     uint16_t valveI = (uint16_t)(valveSum/valveSamples);
-    if (valveI > 100) {
+    if (valveI > 80) {
       while(millis() - servoTime < 500) {
         valveSum += analogRead(I_VALVES);
         valveSamples++;
@@ -54,7 +54,7 @@ bool setValve(uint8_t valve, uint8_t angle) {
     TIMSK4 &= ~(_BV(TOIE4) + _BV(OCIE4A));
     digitalWrite(PWR_EN_SERVO, LOW); 
     valveI = (uint16_t)(valveSum/valveSamples);
-    Serial.println(valveI);
+    //Serial.println(valveI);
     if (valveI < 30) {
       // Valve likely unplugged/broken
       valveError[valve]++;

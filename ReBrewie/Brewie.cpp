@@ -19,6 +19,8 @@ void Brewie::setTemperatures(float mashSetTemp, float boilSetTemp) {
   _mashStartTemp = *_mashTemp;
   _boilStartTemp = *_boilTemp;
   _heaterControlTime = 20000;
+  _mashHeaterControl = 0;
+  _boilHeaterControl = 0;
   _boilingCount = 0;
 
   // Handle fresh boot a little more graciously
@@ -43,7 +45,7 @@ void Brewie::setTemperatures(float mashSetTemp, float boilSetTemp) {
   if (_boilSetTemp > 10.0) {
     _boilHeatSet = true;
     _boilIntegralError  = 0;
-    if (_boilSetTemp >= 100.0) {
+    if (_boilSetTemp >= 99.0) {
       _heaterControlTime = 60000;
     }
   } else {
@@ -134,6 +136,7 @@ void Brewie::Temperature_Control() {
 
     // Calculate control values
     Control_Calculation();
+    Cooling_Calculation();
 
     // Determine temperature reached
     if (_boilCooling) {
@@ -156,7 +159,7 @@ void Brewie::Temperature_Control() {
       }
       if (_boilingCount >= 9) {
         _boilTempReached = true;
-        _coolingError = true;
+        //_coolingError = true;
       }
     } else {
       if (_mashSetTemp-*_mashTemp <= 0.25 && _mashTempDelta <= 0.25 && _mashHeatSet) {
@@ -221,32 +224,36 @@ void Brewie::Temperature_Control() {
     _boilHeaterEnable = false;
     _boilHeaterEnergy += *_powerMeasure - _lastEnergy;
     _lastEnergy = *_powerMeasure;
+  } else if (_boilCoolingEnable && (currentTime - _boilTimer > _boilCoolingControl)) {
+    _boilCoolingEnable = false;
+  }
+  
+  if (_boilCooling) {
+    if (_boilCoolingEnable) {
+      digitalWrite(INLET_2, HIGH);
+    } else {
+      digitalWrite(INLET_2, LOW);
+    }
   }
 
   // Turn on heaters if permitted
   if (_mashHeatSet) {
     if (_mashHeaterEnable) {
         MashHeater->turnOn();
-        //digitalWrite(A1, HIGH);
     } else {
       MashHeater->turnOff();
-      //digitalWrite(A1, LOW);
     }
   } else {
     MashHeater->turnOff();
-    //digitalWrite(A1, LOW);
   }
   if (_boilHeatSet && !_boilCooling) {
     if (_boilHeaterEnable && !_mashHeaterEnable) {
         BoilHeater->turnOn();
-        //digitalWrite(A2, HIGH);
     } else {
       BoilHeater->turnOff();
-      //digitalWrite(A2, LOW);
     }
   } else {
     BoilHeater->turnOff();
-    //digitalWrite(A2, LOW);
   }
 }
 
@@ -277,8 +284,8 @@ void Brewie::Control_Calculation() {
   // MASH
   float mashError = _mashSetTemp - *_mashTemp;
   float mashDerivative = ((_mashTempDelta-0.1)*_heaterControlTime/1.25);
-  float mashIntegral;
-  if (mashError <= 1.00) {
+  float mashIntegral = 0.0;
+  if (mashError <= 1.00 && mashError >= -1.00) {
     _mashIntegralError += mashError;
     if (_mashIntegralError > 3.0) {
       _mashIntegralError = 3.0;  
@@ -305,8 +312,8 @@ void Brewie::Control_Calculation() {
   // BOIL
   float boilError = _boilSetTemp - *_boilTemp;
   float boilDerivative = ((_boilTempDelta-0.1)*_heaterControlTime/1.25);
-  float boilIntegral;
-  if (boilError <= 1.00) {
+  float boilIntegral = 0.0;
+  if (boilError <= 1.00 && boilError >= -1.00) {
     _boilIntegralError += boilError;
     if (_boilIntegralError > 3.0) {
       _boilIntegralError = 3.0;  
@@ -321,6 +328,7 @@ void Brewie::Control_Calculation() {
     _boilHeaterControl = (int32_t)(boilError*1.25 * _heaterControlTime);
     _boilHeaterControl -= (int32_t)boilDerivative;
     _boilHeaterControl += (int32_t)(boilIntegral);
+    //Serial.println(_boilHeaterControl);
 
     if (_boilHeaterControl > (_heaterControlTime*_maxBoilDuty)) {
       _boilHeaterControl = _heaterControlTime * _maxBoilDuty;
@@ -336,6 +344,48 @@ void Brewie::Control_Calculation() {
     }
   } else {
     _boilHeaterControl = 0;
+  }
+}
+
+void Brewie::Cooling_Calculation() {
+  // Enable or disable heaters based on current temperature
+  if (_boilCooling) {
+    if (*_boilTemp <= (_boilSetTemp+0.625)) {
+      _boilCoolingEnable = false;
+    } else {
+      _boilCoolingEnable = true;
+    }
+  } else {
+    _boilCoolingEnable = false;
+  }
+
+  float boilError = *_boilTemp -_boilSetTemp;
+  float boilDerivative = ((_boilTempDelta)*_heaterControlTime/10.0);
+  float boilIntegral = 0.0;
+  if (boilError <= 1.00) {
+    _boilIntegralError += boilError;
+    if (_boilIntegralError > 3.0) {
+      _boilIntegralError = 3.0;  
+    } else if (_boilIntegralError < -1.0) {
+      _boilIntegralError = -1.0;
+    }
+    boilIntegral = _boilIntegralError * 3000.0;
+  } else {
+    _boilIntegralError  = 0;
+  }
+  if (_boilCooling && _boilCoolingEnable) {
+    _boilCoolingControl = (int32_t)((boilError * _heaterControlTime)/2.0);
+    _boilCoolingControl += (int32_t)boilDerivative;
+    _boilCoolingControl += (int32_t)(boilIntegral);
+    //Serial.println(_boilCoolingControl);
+
+    if (_boilCoolingControl > (_heaterControlTime*_maxBoilDuty)) {
+      _boilCoolingControl = _heaterControlTime * _maxBoilDuty;
+    } else if (_boilCoolingControl < _heaterControlTime/10) {
+      _boilCoolingControl = 0;
+    }
+  } else {
+    _boilCoolingControl = 0;
   }
 }
 
@@ -437,7 +487,11 @@ void Brewie::PrintDiagnostics() {
   } else {
     Serial.print("Idle");
   }
-  controlPercent = _boilHeaterControl*100/_heaterControlTime;
+  if (_boilCooling) {
+    controlPercent = _boilCoolingControl*100/_heaterControlTime;
+  } else {
+    controlPercent = _boilHeaterControl*100/_heaterControlTime;
+  }
   Serial.print("       Boil Duty: ");
   Serial.print(controlPercent);
   Serial.print("% ");

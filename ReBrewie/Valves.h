@@ -15,8 +15,8 @@
 #define VALVE_MASH_RET      8
 #define VALVE_BOIL_IN       9
 #define VALVE_OPEN_ANGLE    10
-#define VALVE_CLOSE_ANGLE   205
-#define VALVE_PINCH_ANGLE   150
+#define VALVE_CLOSE_ANGLE   210
+#define VALVE_PINCH_ANGLE   110
 #define VALVE_OPEN          1
 #define VALVE_CLOSE         0
 

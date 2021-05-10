@@ -27,6 +27,7 @@
 #define PWR_EN_ARM          12
 #define PWR_EN_5V           11
 #define PWR_EN_12V          PORTH |= 0x80;
+#define PWR_12V_SENSE       53
 
 // Heaters
 #define MASH_HEATER         4
