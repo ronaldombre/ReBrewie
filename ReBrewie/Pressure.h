@@ -7,6 +7,7 @@ uint8_t TWIReadNACK(void);
 void TWIWrite(uint8_t);
 
 void TWIStart(void);
+
 //send stop signal
 void TWIStop(void);
 

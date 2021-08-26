@@ -37,6 +37,7 @@ void TWIStart(void) {
     TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
     while ((TWCR & (1<<TWINT)) == 0);
 }
+
 //send stop signal
 void TWIStop(void) {
     TWCR = (1<<TWINT)|(1<<TWSTO)|(1<<TWEN);
@@ -67,28 +68,38 @@ uint8_t PressureReadAll(int16_t *pressure, uint16_t *temperature, uint8_t addres
     TWIWrite(address << 1);
     
     if (TWIGetStatus() != 0x18)
-        return 1;
+        return 2;
     //send the rest of address
     TWIWrite(0);
     
     if (TWIGetStatus() != 0x28)
-        return 1;
+        return 3;
     //send start
     TWIStart();
 
     if (TWIGetStatus() != 0x10)
-        return 1;
+        return 4;
     //select devise and send read bit
+ 
     TWIWrite((address << 1)|1);
     
     if (TWIGetStatus() != 0x40)
-        return 1;
-    *pressure = TWIReadACK() << 8;
+        return 5;
+    *pressure = TWIReadACK();
+    *pressure <<= 8;
+    if (TWIGetStatus() != 0x50)
+        return 6;
     *pressure |= TWIReadACK();
-    *temperature = TWIReadACK() << 8;
+    if (TWIGetStatus() != 0x50)
+        return 7;
+    *temperature = TWIReadACK();
+    *temperature <<= 8;
+    if (TWIGetStatus() != 0x50)
+        return 9;
     *temperature |= TWIReadNACK();
     if (TWIGetStatus() != 0x58)
-        return 1;
+        return 10;
+
     TWIStop();
     return 0;
 }

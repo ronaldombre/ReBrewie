@@ -97,6 +97,7 @@ float boilPumpA = 460;
 float mashPumpA = 480;
 float pumpTemp = 0;
 uint16_t waterInletTemp = 692;        // From Mass Sensor (default ~18C)
+float lineFrequency = 0.0;
 
 float mashTankVolume = 0.0;
 float boilTankVolume = 0.0;
@@ -238,8 +239,13 @@ void Brewie_Status_Write() {
   } else {
     brewieLength  = sprintf(statusMessage, "%d\t%u\t%u\t%u\t", currStep, totalTime, stepTime, leftTime);
   }
-  for(uint8_t x = 0; x < notificationCount; x++) {
-    brewieLength += sprintf(&statusMessage[brewieLength], "%s,", brewieMessage[x]);
+  if (requestNextStep) {
+    requestNextStep = false;
+    brewieLength += sprintf(&statusMessage[brewieLength], "P103,");
+  } else {
+    for(uint8_t x = 0; x < notificationCount; x++) {
+      brewieLength += sprintf(&statusMessage[brewieLength], "%s,", brewieMessage[x]);
+    }
   }
   brewieLength += sprintf(&statusMessage[brewieLength], "V%d\t", mcuVersion);
   brewieLength += sprintf(&statusMessage[brewieLength], "%u\t", (uint16_t)massSensor);
@@ -264,10 +270,15 @@ void Brewie_Status_Write() {
   brewieLength += sprintf(&statusMessage[brewieLength], "\t");
   floatTemp = acMeasure;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  brewieLength += sprintf(&statusMessage[brewieLength], "\t");
   floatTemp = inlet1A;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  brewieLength += sprintf(&statusMessage[brewieLength], "\t%d", massOffset);
+  floatTemp = brewie->GetBoilingPoint();
+  brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
+  floatTemp = massTempInC;
+  brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
+  floatTemp = lineFrequency;
+  brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
+  brewieLength += sprintf(&statusMessage[brewieLength], "%u", (uint16_t)(acCurrent*10.0));
 
   brewieLength += sprintf(&statusMessage[brewieLength], "\r\n");
   
@@ -301,9 +312,9 @@ void Brewie_Command_Decode() {
       } else if (commandNum == 27) {
         boilPump->setPumpSpeed(0);
       } else if (commandNum == 28) {
-        digitalWrite(INLET_2, HIGH);
+        brewie->SetCooling();
       } else if (commandNum == 29) {
-        digitalWrite(INLET_2, LOW);
+        brewie->SetHeating();
       } else if (commandNum == 12) {
         setValve(VALVE_MASH_IN, VALVE_OPEN);
       } else if (commandNum == 13) {
@@ -369,17 +380,21 @@ void Brewie_Command_Decode() {
         digitalWrite(VENT_FAN, HIGH);
         digitalWrite(POWER_FAN, HIGH);
         brewie->Start();
+        EnableNotifications(true);
       } else if (commandNum == 1) {     // Pause
         Brewie_Pause();
       } else if (commandNum == 2) {     // Continue
         brewing = true;
         brewiePause = false;
-        if (safetyShutdown) {
+        if (safetyShutdown || errorNotification) {
           // Possible error has occured, let user bypass
           EnableNotifications(false);
           waterOverride = true;
+        } else {
+          EnableNotifications(true);
         }
         safetyShutdown = false;
+        errorNotification = false;
         Process_Step();
         digitalWrite(VENT_FAN, HIGH);
         digitalWrite(POWER_FAN, HIGH);
@@ -398,6 +413,7 @@ void Brewie_Command_Decode() {
           fastWaterReadings = true;
           digitalWrite(VENT_FAN, HIGH);
           digitalWrite(POWER_FAN, HIGH);
+          EnableNotifications(false);
         } else {
           fanOverride = false;
           brewing = false;
@@ -412,6 +428,8 @@ void Brewie_Command_Decode() {
       toLiterNull = atof(&brewieData[brewieCommand[2][0]]);
       mashDelta = atof(&brewieData[brewieCommand[3][0]]);
       boilDelta = atof(&brewieData[brewieCommand[4][0]]);
+      float boilingPoint = atof(&brewieData[brewieCommand[5][0]]);
+      brewie->SetBoilingPoint(boilingPoint);
       Power_On();
       Close_All_Valves();
       Serial.print("!Scanning I2C...");
@@ -446,6 +464,7 @@ void Brewie_Command_Decode() {
         } else {
           Close_All_Valves();
           Brewie_Reset();
+          EnableNotifications(false);
           hopTanksOpen = 0;
         }
       }
@@ -454,9 +473,7 @@ void Brewie_Command_Decode() {
 
   if (boilPump->isRunning()) {
     if (hopTanksOpen > 0) {
-      boilPump->setPumpSpeed(80+50*(hopTanksOpen-1));
-    } else if (hopTanksOpen > 4) {
-      hopTanksOpen = 4;
+      boilPump->setPumpSpeed(75+50*(hopTanksOpen-1));
     }
   }
 }
@@ -506,13 +523,12 @@ void Step_Change() {
         newStep = false;
         Process_Step();
       }
-      EnableNotifications(true);
       waterOverride = false;
-    } else if (!newStep && !stepActive) {       // Might not be necessary now that I check for this in main loop
+    } /*else if (!newStep && !stepActive) {       // Might not be necessary now that I check for this in main loop
       if (brewieStepBuffer[0] == -1) {
         currStep = -1;
       }
-    }
+    }*/
   }
 }
 
@@ -786,6 +802,11 @@ void Process_Sensors() {
   static uint32_t massAve = 0;
   static uint8_t massSamp = 0;
   static uint32_t massTime = millis();
+  static uint32_t peakTempLast = 0; 
+  static uint32_t peakTime = 0;
+  static uint32_t peakTime2 = 0;
+  static uint8_t peakDetectState = 0;
+  //static uint16_t peakSamples = 0;
 
   float timeDiff = millis() - sensorTime;
   if (timeDiff > 500) {
@@ -813,13 +834,63 @@ void Process_Sensors() {
   uint16_t acTemp = analogRead(AC_MEAS);
   if (acTemp > 7) {
     acTemp -= 8;
-    float peakTemp = (float)acTemp/12.0*0.7071;
-    if (peakTemp > acPeakCurrent) {
-      acPeakCurrent = peakTemp;
-    }
-    // On a cycle-by-cycle basis, check for high current
-    if (acPeakCurrent > 16.0) {
-      // Do what????
+    float peakTemp = (float)acTemp/12.0;
+    
+    switch(peakDetectState) {
+      case 0:
+        if (acTemp > 50) {
+          // Above noise floor
+          //peakStartTime = micros;
+          peakDetectState++;
+          //peakTime = TCNT3;//micros();
+          TCNT3 = 0;
+        }
+        break;
+      case 1:
+        if (acTemp > peakTempLast) {
+          // Rising current
+          peakTempLast = peakTemp;
+        } else if (acTemp < (peakTempLast-40)) {
+          // Falling current
+          peakDetectState++;
+        }
+        break;
+      case 2:
+        if (acTemp < 5) {
+          // Above noise floor
+          //peakEndTime = micros;
+          peakDetectState++;
+          peakTempLast = 0;
+        } 
+        break;
+      case 3:
+        // Round 2
+        if (acTemp > 50) {
+          // Above noise floor
+          //peakStartTime2 = micros;
+          peakDetectState++;
+          peakTime2 = TCNT3;
+        }
+        break;
+      case 4:
+        if (acTemp > peakTempLast) {
+          // Rising current
+          peakTempLast = acTemp;
+        } else if (acTemp < (peakTempLast-40)) {
+          // Falling current
+          peakDetectState++;
+          
+        }
+        break;
+      case 5:
+        if (acTemp < 5) {
+          // Above noise floor
+          //peakEndTime = micros;
+          peakDetectState = 0;
+          peakTempLast = 0;
+          lineFrequency = 2000000.0/((float)(peakTime2));
+        } 
+        break;
     }
     
   } else {
@@ -855,67 +926,64 @@ void Process_Sensors() {
 
   // Pressure sensor seems to take > 100ms to take a reading
   // Process I2C Weight/Pressure Sensors
-  if (powerOn) {
-    if (millis() - massTime > 44) {
-      massTime = millis();
+  if (millis() - massTime > 44) {
+    massTime = millis();
 
-      uint8_t errorCode = PressureReadAll(&massFast, &massTemp, massAddress);
-      if (errorCode == 1) {
-        massSensor = 0xFFFF;
-        TWIInit();
-      }
-      massTemp = massTemp >> 5;
+    uint8_t errorCode = PressureReadAll(&massFast, &massTemp, massAddress);
+    if (errorCode != 0) {
+      massSensor = errorCode;
+      TWIInit();
+    }
 
-      uint8_t massPlusStatus = (massFast >> 14);
-      uint8_t massStatus = (massPlusStatus & 0x03);
+    uint8_t massPlusStatus = (massFast >> 14);
+    uint8_t massStatus = (massPlusStatus & 0x03);
+    
+    // Check status flags for new data or error
+    if (massStatus == 0 && errorCode == 0) {
+      validMass = true;
+      massFast = massFast & 0x3FFF;
+      massTempInC = ((float)massTemp/256.0 - 70.0);
       
-      // Check status flags for new data or error
-      if (massStatus == 0 && errorCode != 1) {
-        validMass = true;
-        massFast = massFast & 0x3FFF;
-        massTempInC = (float)(massTemp - 512)/10.0;
-        
-        // Mass temp sensor is slow to react, but tank temperature is too fast. Split difference?
-        float tempAdjust = boilTemp;//(massTempInC + boilTemp)/2.0;
-        if (boilTemp > (massTempInC + 5.0)) {
-          tempAdjust = massTempInC;
-        }
-        if (tempAdjust > 0.0) {
-          massOffset = (int16_t)(((tempAdjust - pressureTempCal)*toLiter)*0.15);
-        } else {
-          massOffset = 0;
-        }
-        if (massFast > massOffset) {
-          massFast -= massOffset;
-        } else {
-          massFast = 0;
-        }
-        // Don't add to main water level accumulator if reading isn't going to be accurate
-        if (boilPump->pumpTach() < 5 && !boilPump->isRunning()) {
-          massAve += massFast;
-          massSamp++;
-        }
+      // Mass temp sensor is slow to react, but tank temperature is too fast. Split difference?
+      float tempAdjust = boilTemp;//(massTempInC + boilTemp)/2.0;
+      if (boilTemp > (massTempInC + 5.0)) {
+        tempAdjust = massTempInC;
       }
-  
-      if (massSamp > 7) {
-        massSensor = (uint16_t)((float)massAve/(float)massSamp);
-        if (fastWaterReadings) {
-          int16_t adjMass = (int16_t)massSensor - (int16_t)toLiterNull;
-          if (adjMass < 0) {
-            adjMass = 0;
-          }
-          waterVolume = (float)adjMass/toLiter;
-        } else {
-          if (massSensor > ((uint16_t)toLiterNull)) {
-            massSensor -= (uint16_t)toLiterNull;
-          } else {
-            massSensor = 0;
-          }
-          waterVolume = (float)massSensor/toLiter;
-        }
-        massAve = 0;
-        massSamp = 0;
+      if (tempAdjust > 0.0) {
+        massOffset = (int16_t)(((tempAdjust - pressureTempCal)*toLiter)*0.15);
+      } else {
+        massOffset = 0;
       }
+      if (massFast > massOffset) {
+        massFast -= massOffset;
+      } else {
+        massFast = 0;
+      }
+      // Don't add to main water level accumulator if reading isn't going to be accurate
+      if (boilPump->pumpTach() < 5 && !boilPump->isRunning()) {
+        massAve += massFast;
+        massSamp++;
+      }
+    }
+
+    if (massSamp > 7) {
+      massSensor = (uint16_t)((float)massAve/(float)massSamp);
+      if (fastWaterReadings) {
+        int16_t adjMass = (int16_t)massSensor - (int16_t)toLiterNull;
+        if (adjMass < 0) {
+          adjMass = 0;
+        }
+        waterVolume = (float)adjMass/toLiter;
+      } else {
+        if (massSensor > ((uint16_t)toLiterNull)) {
+          massSensor -= (uint16_t)toLiterNull;
+        } else {
+          massSensor = 0;
+        }
+        waterVolume = (float)massSensor/toLiter;
+      }
+      massAve = 0;
+      massSamp = 0;
     }
   }
 }
@@ -1355,7 +1423,7 @@ void Safety_Check() {
     if (AddNotification("E210")) {
       Brewie_Pause();
     }
-  } else if (acCurrent < 1.0) {
+  } else if (acCurrent < 2.0) {
     // Heater undercurrent check (should be ~10-12 for 120V, 7-10 for 240V)
     if (brewie->MashHeaterOn()) {
       if (digitalRead(POWER_LIGHT) == LOW) {
@@ -1375,13 +1443,9 @@ void Safety_Check() {
     }
   } else {
     if (brewie->MashHeaterOn()) {
+      heaterCheck+=2;
       digitalWrite(POWER_LIGHT, HIGH);
-    } else {
-      digitalWrite(POWER_LIGHT, LOW);
-    }
-    if (brewie->BoilHeaterOn()) {
-      digitalWrite(DRAIN_LIGHT, HIGH);
-      if (machineVoltage == 0) {
+      if (machineVoltage == 0 && heaterCheck > 2) {
         if (acCurrent > 10) {
           machineVoltage = 120;
         } else {
@@ -1389,9 +1453,29 @@ void Safety_Check() {
         }
       }
     } else {
+      if (heaterCheck > 0) {
+        heaterCheck--;
+      }
+      digitalWrite(POWER_LIGHT, LOW);
+    }
+    if (brewie->BoilHeaterOn()) {
+      heaterCheck+=2;
+      digitalWrite(DRAIN_LIGHT, HIGH);
+      if (machineVoltage == 0 && heaterCheck > 2) {
+        if (acCurrent > 10) {
+          machineVoltage = 120;
+        } else {
+          machineVoltage = 240;
+        }
+      }
+    } else {
+      if (heaterCheck > 0) {
+        heaterCheck--;
+      }
       digitalWrite(DRAIN_LIGHT, LOW);
     }
   }
+  
   // Turn off boil heater if no water detected
   // Empty tank safety
   if (brewie->BoilHeaterOn()) {
@@ -1573,15 +1657,11 @@ void Brewie_Status() {
     switch(stepChangeState) {
       case 0:
         if (requestNextStep) {
-          requestNextStep = false;
           if (lastStep) {
             currStep = -1;
             lastStep = false;
           } else {
             brewieStepRequestFlag = true;
-            AddNotification("P103");
-            //sprintf(&brewieMessage[messageCount][0], "P%d", 103);
-            //messageCount++;
             // Add remaining time to keep total time "accurate"
             totalTime += leftTime;
             stepTime = 0;
@@ -1624,7 +1704,9 @@ void Brewie_Status() {
         break;
     }
 
-    Safety_Check();
+    if (!brewieStepRequestFlag) {
+      Safety_Check();
+    }
     // Safety Check turns off lights in favor or heater indication, so fake it out by turning them on again until machine has booted
     if (powerOn) {
       if (!calibrationSent) {
@@ -1666,7 +1748,13 @@ void Initialize_2560() {
   PORTJ |= 0x83;
   DDRF &= ~0xF8;
   PORTF |= 0xF8;
-  
+
+  // Set up Timer 3 for AC Line tracking
+  TCCR3A = _BV(WGM31);
+  TCCR3B = _BV(WGM33) + _BV(WGM32) + _BV(CS31);
+  ICR3 = 63000;
+  //TIMSK3 |= _BV(TOIE3) + _BV(OCIE3A);
+
   // Set up Timer 4 for Servos
   TCCR4A = _BV(WGM41);
   TCCR4B = _BV(WGM43) | _BV(WGM42) | _BV(CS41); 
@@ -1822,6 +1910,7 @@ void Power_Off() {
   PORTB &= ~0x11;
   DDRE |= 0x02;
   PORTE &= ~0x02;
+  EnableNotifications(false);
 }
 
 void Brewie_Pause() {
@@ -1845,6 +1934,14 @@ void Fast_Water_Readings() {
       validMass = false;
     }
   }
+}
+
+ISR(TIMER3_COMPA_vect){
+  PORTE &= ~0x04;
+}
+
+ISR(TIMER3_OVF_vect){
+  PORTE |= 0x04;
 }
 
 // Pulsing Interrupt

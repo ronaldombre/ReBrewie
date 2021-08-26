@@ -20,6 +20,9 @@ class Brewie {
     void Reset();
     void Start();
 
+    float GetBoilingPoint();
+    void SetBoilingPoint(float);
+
     void SetMashMaxDuty(float);
     void SetBoilMaxDuty(float);
 
@@ -69,13 +72,8 @@ class Brewie {
 
     float* _powerMeasure;
 
-    uint32_t _boilDeltaTimer;
-    float _boilDeltaAverage;
-
     float _mashTempSum;
     float _boilTempSum;
-    float _deltaMashTempSum;
-    float _deltaBoilTempSum;
     float _mashTempMax;
     float _boilTempMax;
     float _mashTempMin;
@@ -84,9 +82,12 @@ class Brewie {
     float _boilTempAverage;
     float _mashTempAverageLast;
     float _boilTempAverageLast;
+    float _mashTempSpread;
+    float _boilTempSpread;
     uint8_t _tempSamples;
     uint8_t _boilingCount;
     bool _boilDetect;
+    float _boilingPoint;
 
     bool _setBoiling;
     bool _boilCooling;

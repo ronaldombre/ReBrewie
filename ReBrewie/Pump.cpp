@@ -23,7 +23,7 @@ void Pump::Pump_Speed_Control(uint16_t current) {
   _expectedCurrent = 0.007155*_pumpSpeed*_pumpSpeed - 0.346564*_pumpSpeed + 28.425309;
   // Expected RPM for speed:
   _expectedRPM = -0.001234*_pumpSpeed*_pumpSpeed + 0.932027*_pumpSpeed - 10.832309;
-  _percentLoad = ((_expectedCurrent - current)/_expectedCurrent + (_expectedRPM - _pumpTach)/_expectedRPM)*100.0;
+  //_percentLoad = ((_expectedCurrent - current)/_expectedCurrent + (_expectedRPM - _pumpTach)/_expectedRPM)*100.0;
   if (_pumpEnable) {
     switch(_pumpState) {
       case 0: // Running
@@ -39,7 +39,7 @@ void Pump::Pump_Speed_Control(uint16_t current) {
             _pumpIsClogged = false;
           }
         }
-        if (_pumpCurrent < (_expectedCurrent*.7)) {
+        if (_pumpCurrent < (_expectedCurrent*.75)) {
           // Pump may be running dry
           _dryRun++;
           if (_pumpCurrent < 35) {
@@ -88,7 +88,7 @@ void Pump::Pump_Speed_Control(uint16_t current) {
         break;
       case 3: // Stop pumping
         if (_pumpCount++ > 3) {
-          if (_pumpCurrent < (_expectedCurrent*.80)) {
+          if (_pumpCurrent < (_expectedCurrent*.75)) {
             // Pump may be running dry
             _pumpDiag = 2;
             _dryRun++;
@@ -108,16 +108,16 @@ void Pump::Pump_Speed_Control(uint16_t current) {
         }
         break;
       case 4: // Restart pump
-        if (_pumpCount++ > 3) {
+        if (_pumpCount++ > 2) {
           _setPumpSpeed();
           _pumpState = 5;
         }
         break;
       case 5: // Restart monitor, quicker dry detection
-        if (_pumpCount++ > 0) {
-          if (_pumpCurrent < (_expectedCurrent*.7)) {
+        if (_pumpCount++ > 1) {
+          if (_pumpCurrent < (_expectedCurrent*.75)) {
             // Pump may be running dry
-            _pumpDiag = 3;
+            _pumpDiag = 2;
             _dryRun++;
             if (_pumpCurrent < 35) {
               // Not on? Resend DAC value

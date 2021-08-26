@@ -1,13 +1,13 @@
 #include "Notifications.h"
 
 char brewieMessage[4][5];      // Standard message buffer to report commands to Olimex
-uint8_t notificationCount = 0;         // Count variable if multiple messages or errors arise
-bool notificationsEnabled = true;
+uint8_t notificationCount = 0;         // Count variable if multiple messages arise
+bool notificationsEnabled = false;
+bool errorNotification = false;
 
 bool AddNotification(char message[5]) {
-  //String test = &message[1];
-  //test.toInt();
   bool added = false;
+
   if (message[0] == 'P' && notificationCount < 4) {
     sprintf(brewieMessage[notificationCount], message);
     notificationCount++;
@@ -16,6 +16,7 @@ bool AddNotification(char message[5]) {
     sprintf(brewieMessage[notificationCount], message);
     notificationCount++;
     added = true;
+    errorNotification = true;
   }
   return added;
 }
