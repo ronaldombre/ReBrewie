@@ -389,6 +389,7 @@ void Brewie::Control_Calculation() {
   } else {
     _boilHeaterControl = 0;
   }
+  OCR3A = _boilHeaterControl*3;
 }
 
 void Brewie::Cooling_Calculation() {

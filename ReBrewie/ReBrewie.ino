@@ -756,11 +756,15 @@ bool Step_Complete() {
 void Process_Temperature() {
   //Process 1-Wire Temperatures
   if (powerOn) {
-    mashTemp = MashTemp->getTempC(mashAddress);
-    mashTemp += mashDelta;
-    boilTemp = BoilTemp->getTempC(boilAddress);
-    boilTemp += boilDelta;
     if (MashTemp->isConnected(mashAddress)) {
+      mashTemp = MashTemp->getTempC(mashAddress);
+      if (mashTemp == -127.0) {
+        if (AddNotification("E115")) {
+          Brewie_Pause();
+        }
+      } else {
+        mashTemp += mashDelta;
+      }
       MashTemp->requestTemperaturesByAddress(mashAddress);
     } else {
       delete MashTemp;
@@ -772,6 +776,14 @@ void Process_Temperature() {
       MashTemp->setWaitForConversion(false);
     }
     if (BoilTemp->isConnected(boilAddress)) {
+      boilTemp = BoilTemp->getTempC(boilAddress);
+      if (boilTemp == -127.0) {
+        if (AddNotification("E116")) {
+          Brewie_Pause();
+        }
+      } else {
+        boilTemp += boilDelta;
+      }
       BoilTemp->requestTemperaturesByAddress(boilAddress);
     } else {
       delete BoilTemp;
@@ -781,16 +793,6 @@ void Process_Temperature() {
       BoilTemp->getAddress(boilAddress, 0);
       BoilTemp->setCheckForConversion(true);
       BoilTemp->setWaitForConversion(false);
-    }
-    if (mashTemp == -127.0) {
-      if (AddNotification("E115")) {
-        Brewie_Pause();
-      }
-    }
-    if (boilTemp == -127.0) {
-      if (AddNotification("E116")) {
-        Brewie_Pause();
-      }
     }
   }
 }
@@ -842,8 +844,8 @@ void Process_Sensors() {
           // Above noise floor
           //peakStartTime = micros;
           peakDetectState++;
-          //peakTime = TCNT3;//micros();
-          TCNT3 = 0;
+          peakTime = TCNT3;//micros();
+          //TCNT3 = 0;
         }
         break;
       case 1:
@@ -869,7 +871,8 @@ void Process_Sensors() {
           // Above noise floor
           //peakStartTime2 = micros;
           peakDetectState++;
-          peakTime2 = TCNT3;
+          //peakTime2 = TCNT3;
+          TCNT3 = 2100;
         }
         break;
       case 4:
@@ -886,9 +889,9 @@ void Process_Sensors() {
         if (acTemp < 5) {
           // Above noise floor
           //peakEndTime = micros;
-          peakDetectState = 0;
+          //peakDetectState = 0;
           peakTempLast = 0;
-          lineFrequency = 2000000.0/((float)(peakTime2));
+          lineFrequency = 250000.0/((float)(peakTime2-peakTime));
         } 
         break;
     }
@@ -1752,7 +1755,8 @@ void Initialize_2560() {
   // Set up Timer 3 for AC Line tracking
   TCCR3A = _BV(WGM31);
   TCCR3B = _BV(WGM33) + _BV(WGM32) + _BV(CS31);
-  ICR3 = 63000;
+  ICR3 = 62500;
+  OCR3A = 1;
   //TIMSK3 |= _BV(TOIE3) + _BV(OCIE3A);
 
   // Set up Timer 4 for Servos
@@ -1937,20 +1941,27 @@ void Fast_Water_Readings() {
 }
 
 ISR(TIMER3_COMPA_vect){
+  cli();
   PORTE &= ~0x04;
+  sei();
 }
 
 ISR(TIMER3_OVF_vect){
+  cli();
   PORTE |= 0x04;
+  sei();
 }
 
 // Pulsing Interrupt
 ISR(TIMER5_COMPC_vect){
+  cli();
   //PORTL &= ~0x20;
   PORTF &= ~0x02;
+  sei();
 }
 
 ISR(TIMER5_OVF_vect){
+  cli();
   //PORTL |= 0x20;
   PORTF |= 0x02;
   if (OCR5A == 1) {
@@ -1964,6 +1975,7 @@ ISR(TIMER5_OVF_vect){
       OCR5A = 1;
     }
   }
+  sei();
 }
 
 // Tachometer Interrupts
