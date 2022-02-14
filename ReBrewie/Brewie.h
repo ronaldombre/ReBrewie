@@ -42,8 +42,6 @@ class Brewie {
     float _boilTempDelta;
     float _mashSetTemp;
     float _boilSetTemp;
-    float _mashStartTemp;
-    float _boilStartTemp;
     bool _mashTempReached;
     bool _boilTempReached;
     
@@ -62,9 +60,6 @@ class Brewie {
     int32_t _heaterControlTime;
     float _mashIntegralError;
     float _boilIntegralError;
-    
-    float _mashTempPrevious;
-    float _boilTempPrevious;
 
     uint32_t _heaterTime;
     uint32_t _mashTimer;
@@ -74,16 +69,16 @@ class Brewie {
 
     float _mashTempSum;
     float _boilTempSum;
-    float _mashTempMax;
-    float _boilTempMax;
-    float _mashTempMin;
-    float _boilTempMin;
+    //float _mashTempMax;
+    //float _boilTempMax;
+    //float _mashTempMin;
+    //float _boilTempMin;
     float _mashTempAverage;
     float _boilTempAverage;
     float _mashTempAverageLast;
     float _boilTempAverageLast;
-    float _mashTempSpread;
-    float _boilTempSpread;
+    //float _mashTempSpread;
+    //float _boilTempSpread;
     uint8_t _tempSamples;
     uint8_t _boilingCount;
     bool _boilDetect;

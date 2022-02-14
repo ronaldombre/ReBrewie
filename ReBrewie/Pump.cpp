@@ -12,18 +12,33 @@ Pump::Pump(uint8_t pin, bool channel) {
   _pumpDry = false;
 }
 
-void Pump::Pump_Speed_Control(uint16_t current) {
+void Pump::Pump_Speed_Control(float current) {
   _pumpCurrent = current;
+
   // Calculate pump RPM and flow
-  _pumpTach = (uint8_t)((uint16_t)*pumpTicks*100/((millis() - _pumpTime)/10));
-  _pumpTime = millis();
+  uint32_t tempTime = millis();
+  _pumpTach = (float)(*pumpTicks)/((float)(tempTime-_pumpTime))*1000.0;
+  _pumpTime = tempTime;
   _pumpFlow += (uint16_t)(*pumpTicks);
   *pumpTicks = 0;
   // Expected current for speed:
   _expectedCurrent = 0.007155*_pumpSpeed*_pumpSpeed - 0.346564*_pumpSpeed + 28.425309;
   // Expected RPM for speed:
   _expectedRPM = -0.001234*_pumpSpeed*_pumpSpeed + 0.932027*_pumpSpeed - 10.832309;
-  //_percentLoad = ((_expectedCurrent - current)/_expectedCurrent + (_expectedRPM - _pumpTach)/_expectedRPM)*100.0;
+
+  // Pump Flow Estimation
+  float pumpSpeedf = (float)_pumpSpeed;
+  if (_pumpSpeed > 0) {
+    float minCurrent = 0.004471*pumpSpeedf*pumpSpeedf-0.095061*pumpSpeedf+22.881203;
+    float diffCurrent = _pumpCurrent - minCurrent;
+    if (diffCurrent > 0) {
+      _flowRate = 26.2*pow((_pumpCurrent - minCurrent),0.333);
+    } else {
+      _flowRate = 0;
+    }
+    _flowTotal += _flowRate;
+  }
+  
   if (_pumpEnable) {
     switch(_pumpState) {
       case 0: // Running
@@ -76,7 +91,7 @@ void Pump::Pump_Speed_Control(uint16_t current) {
         break;
       case 2: // Pump again to remove every drop of water
         if (_pumpCount++ > 4) {
-          _pumpSpeedRestart = 110;
+          _pumpSpeedRestart = 150;
           _setPumpSpeed();
           _pumpState++;
           _pumpCount = 0;
@@ -96,6 +111,7 @@ void Pump::Pump_Speed_Control(uint16_t current) {
             if (_dryRun > 0) {
               _dryRun--;
             }
+            _pumpDiag = 1;
           }
           if (_pumpCount > 20 || _dryRun > 5) {
             _pumpState = 0;
@@ -127,6 +143,7 @@ void Pump::Pump_Speed_Control(uint16_t current) {
             if (_dryRun > 0) {
               _dryRun--;
             }
+            _pumpDiag = 1;
           }
           if (_dryRun > 3) {
             _stopPump();
@@ -166,9 +183,11 @@ void Pump::setPumpSpeed(uint8_t pumpSpeed) {
   } else {
     _running = true;
     _pumpDiag = 255;
+    PORTH |= 0x80;
     digitalWrite(_pumpPin, HIGH);
     _pumpEnable = true;
     _pumpSpeedRestart = _pumpSpeed;
+    _flowTotal = 0;
   }
 }
 
@@ -188,6 +207,7 @@ void Pump::_setPumpSpeed() {
   } else {
     _running = true;
     _pumpDiag = 255;
+    PORTH |= 0x80;
     digitalWrite(_pumpPin, HIGH);
     _pumpEnable = true;
   }
@@ -215,11 +235,13 @@ void Pump::writeDAC() {
   dataPack |= 0x1000;
   uint8_t data1 = (uint16_t)dataPack >> 8;
   uint8_t data2 = dataPack & 0x00FF;
- 
+  SPI.beginTransaction(SPISettings(250000, MSBFIRST, SPI_MODE0));
+  //pinMode(53, OUTPUT);
   PORTB &= ~0x10;
   SPI.transfer(data1);
   SPI.transfer(data2);
   PORTB |= 0x10;
+  //pinMode(53, INPUT);
   SPI.endTransaction();
 }
 
@@ -231,12 +253,20 @@ bool Pump::isRunning() {
   return _running;
 }
 
-uint8_t Pump::pumpTach() {
+float Pump::pumpTach() {
   return _pumpTach;
 }
 
 uint16_t Pump::pumpFlow() {
   return _pumpFlow;
+}
+
+float Pump::flowRate() {
+  return _flowRate;
+}
+
+float Pump::flowTotal() {
+  return _flowTotal;
 }
 
 uint8_t Pump::pumpDiag() {

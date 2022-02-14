@@ -7,16 +7,18 @@
 class Pump {
   public:
     Pump(uint8_t pin, bool channel);
-    void Pump_Speed_Control(uint16_t current);
+    void Pump_Speed_Control(float current);
     void setPumpSpeed(uint8_t pumpSpeed);
     void writeDAC();
     void setPumpOut();
-    uint8_t pumpTach();
+    float pumpTach();
     uint8_t pumpDiag();
     bool pumpIsDry();
     bool pumpIsClogged();
     void pumpFlowReset();
     uint16_t pumpFlow();
+    float flowRate();
+    float flowTotal();
     bool isRunning();
 
     volatile uint8_t* pumpTicks;
@@ -27,11 +29,11 @@ class Pump {
     
     uint8_t _pumpPin;
     bool _pumpChannel;
-    uint8_t _pumpTach;
+    float _pumpTach;
     uint8_t _pumpSpeed;
     uint8_t _pumpSpeedRestart;
     uint8_t _pumpDiag;
-    uint16_t _pumpCurrent;
+    float _pumpCurrent;
     uint16_t _pumpFlow;
     uint8_t _dryRun;
     uint8_t _cloggedCount;
@@ -45,7 +47,10 @@ class Pump {
 
     float _expectedRPM;
     float _expectedCurrent;
-    float _percentLoad;
+    float _flowRate;
+    float _flowTotal;
+    float _pumpScaleI;
+    float _pumpConstI;
 
     uint32_t _pumpTime;
 };

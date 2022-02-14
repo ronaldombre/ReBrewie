@@ -8,6 +8,7 @@ Heater::Heater(uint8_t pinHeater) {
   _heatPort = portOutputRegister(port);
   *_heatDir |= _heatMask;
   *_heatPort &= ~_heatMask;
+  _heatActive = false;
 }
 
 Heater::Heater(volatile uint8_t* pinPort, volatile uint8_t* pinDir, uint8_t pin) {

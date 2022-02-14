@@ -34,9 +34,8 @@ bool setValve(uint8_t valve, uint8_t angle) {
     TCNT4 = ICR4;
     OCR4A = 1200 + (uint16_t)(setAngle*10);
     TIMSK4 |= _BV(TOIE4) + _BV(OCIE4A);
-    digitalWrite(PWR_EN_SERVO, HIGH);  
+     
     // Servo seems to take 100ms to react to a change
-    delay(100);
     uint32_t servoTime = millis();
     uint32_t valveSum = 0;
     uint16_t valveSamples = 0;
@@ -46,13 +45,13 @@ bool setValve(uint8_t valve, uint8_t angle) {
     }
     uint16_t valveI = (uint16_t)(valveSum/valveSamples);
     //if (valveI > 80) {
-      while(millis() - servoTime < 600) {
+      while(millis() - servoTime < 650) {
         valveSum += analogRead(I_VALVES);
         valveSamples++;
       }
     //}
+    delay(150);
     TIMSK4 &= ~(_BV(TOIE4) + _BV(OCIE4A));
-    digitalWrite(PWR_EN_SERVO, LOW); 
     valveI = (uint16_t)(valveSum/valveSamples);
     //Serial.println(valveI);
     if (valveI < 30) {

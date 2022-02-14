@@ -1,4 +1,3 @@
-
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <SPI.h>
@@ -17,7 +16,7 @@
 //#include "B20.h"
 
 // Global Configurations
-const uint8_t spargePumpSpeed = 100;      // Reduce sparging pumping speed
+uint8_t spargePumpSpeed = 100;      // Reduce sparging pumping speed
 
 const uint8_t mcuVersion = 7;
 
@@ -96,7 +95,7 @@ float servosA = 0;
 float boilPumpA = 460;
 float mashPumpA = 480;
 float pumpTemp = 0;
-uint16_t waterInletTemp = 692;        // From Mass Sensor (default ~18C)
+float waterInletTemp = 18.0;        // From Mass Sensor (default ~18C)
 float lineFrequency = 0.0;
 
 float mashTankVolume = 0.0;
@@ -132,7 +131,7 @@ void loop() {
       powerButton = true;
     }
     if (digitalRead(DRAIN_BUTTON) == HIGH) {
-      drainButton = true;
+      drainButton = true;      
     }
     if (Brewie_Read() == false) {
       // If no command over UART, Process
@@ -258,11 +257,16 @@ void Brewie_Status_Write() {
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   floatTemp = boilTemp*10.0;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  floatTemp = (float)(mashPump->pumpTach());
+  floatTemp = mashPump->pumpTach();
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  floatTemp = (float)(boilPump->pumpTach());
+  floatTemp = boilPump->pumpTach();
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  brewieLength += sprintf(&statusMessage[brewieLength], "%u\t\%u\t%u\t\%u\t", mashPump->pumpDiag(), (uint16_t)mashPumpA, boilPump->pumpDiag(), (uint16_t)boilPumpA);
+  brewieLength += sprintf(&statusMessage[brewieLength], "%u\t", mashPump->pumpDiag());
+  floatTemp = mashPumpA;
+  brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
+  brewieLength += sprintf(&statusMessage[brewieLength], "%u\t", boilPump->pumpDiag());
+  floatTemp = boilPumpA;
+  brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   brewieLength += sprintf(&statusMessage[brewieLength], "%u\t\%u\t%u\t", (uint8_t)brewie->MashHeaterOn(), (uint8_t)brewie->BoilHeaterOn(), (uint16_t)boardTemp);
   if (newCommand) {
     brewieLength += sprintf(&statusMessage[brewieLength], echoMessage);
@@ -270,13 +274,13 @@ void Brewie_Status_Write() {
   brewieLength += sprintf(&statusMessage[brewieLength], "\t");
   floatTemp = acMeasure;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  floatTemp = inlet1A;
+  floatTemp = mashPump->flowTotal();
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   floatTemp = brewie->GetBoilingPoint();
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   floatTemp = massTempInC;
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
-  floatTemp = lineFrequency;
+  floatTemp = boilPump->flowTotal();
   brewieLength += floatToStringAppend(&floatTemp, &statusMessage[brewieLength]);
   brewieLength += sprintf(&statusMessage[brewieLength], "%u", (uint16_t)(acCurrent*10.0));
 
@@ -429,20 +433,11 @@ void Brewie_Command_Decode() {
       mashDelta = atof(&brewieData[brewieCommand[3][0]]);
       boilDelta = atof(&brewieData[brewieCommand[4][0]]);
       float boilingPoint = atof(&brewieData[brewieCommand[5][0]]);
+      if (boilingPoint < 86.0) {
+        boilingPoint = 100.0;
+      }
       brewie->SetBoilingPoint(boilingPoint);
       Power_On();
-      Close_All_Valves();
-      Serial.print("!Scanning I2C...");
-      uint8_t iAddress = ScanTWI();
-      Serial.println("done");
-      if (iAddress > 1 && iAddress < 128) {
-        //massAddress = iAddress; 
-        Serial.print("!Pressure sensor found at address: 0x");
-        Serial.println(iAddress, HEX);
-      } else {
-        Serial.println("!Pressure sensor not found!");
-      }
-      Brewie_Reset();
     } else if (brewieData[3] == '9') {
       if (commandNum == 98) {
         if (currStep != -1) {
@@ -598,6 +593,7 @@ void Process_Step() {
     case 2: // Sparge and Water Calibration (Same as P205?)
       if (brewieStep[STEP_MASH_PUMP] > 0) {
         spargeOverride = true;
+        spargePumpSpeed = brewieStep[STEP_MASH_PUMP];
         // Override sparge valve and pump settings since they change on their own
         brewieStep[STEP_MASH_PUMP] = 0;
         brewieStep[STEP_BOIL_PUMP] = 0;
@@ -756,17 +752,15 @@ bool Step_Complete() {
 void Process_Temperature() {
   //Process 1-Wire Temperatures
   if (powerOn) {
-    if (MashTemp->isConnected(mashAddress)) {
-      mashTemp = MashTemp->getTempC(mashAddress);
-      if (mashTemp == -127.0) {
-        if (AddNotification("E115")) {
-          Brewie_Pause();
-        }
-      } else {
-        mashTemp += mashDelta;
-      }
-      MashTemp->requestTemperaturesByAddress(mashAddress);
+    mashTemp = MashTemp->getTempC(mashAddress);
+    boilTemp = BoilTemp->getTempC(boilAddress);
+    
+    if (mashTemp > -127.0) {
+      mashTemp += mashDelta;
     } else {
+      if (AddNotification("E115")) {
+        Brewie_Pause();
+      }
       delete MashTemp;
       MashTempPin->reset();
       MashTemp = new DallasTemperature(MashTempPin);
@@ -775,17 +769,14 @@ void Process_Temperature() {
       MashTemp->setCheckForConversion(true);
       MashTemp->setWaitForConversion(false);
     }
-    if (BoilTemp->isConnected(boilAddress)) {
-      boilTemp = BoilTemp->getTempC(boilAddress);
-      if (boilTemp == -127.0) {
-        if (AddNotification("E116")) {
-          Brewie_Pause();
-        }
-      } else {
-        boilTemp += boilDelta;
-      }
-      BoilTemp->requestTemperaturesByAddress(boilAddress);
+    MashTemp->requestTemperaturesByAddress(mashAddress);
+
+    if (boilTemp > -127.0) {
+      boilTemp += boilDelta;
     } else {
+      if (AddNotification("E116")) {
+        Brewie_Pause();
+      }
       delete BoilTemp;
       BoilTempPin->reset();
       BoilTemp = new DallasTemperature(BoilTempPin);
@@ -794,6 +785,7 @@ void Process_Temperature() {
       BoilTemp->setCheckForConversion(true);
       BoilTemp->setWaitForConversion(false);
     }
+    BoilTemp->requestTemperaturesByAddress(boilAddress);
   }
 }
 
@@ -811,18 +803,19 @@ void Process_Sensors() {
   //static uint16_t peakSamples = 0;
 
   float timeDiff = millis() - sensorTime;
-  if (timeDiff > 500) {
+  if (timeDiff > 900) {
     sensorTime = millis();
     //Serial.println(samples);
 
-    if (samples > 100) {
-      acCurrent = (float)(sensorArray[0]/(float)samples)/12.0;
+    if (samples > 500) {
+      float numSamps = (float)samples;
+      acCurrent = ((float)(sensorArray[0]))/numSamps/12.0;
       acMeasure += acCurrent/3600.0*(float)machineVoltage*((float)timeDiff/1000.0);             // Convert back to per sample period basis
       boardTemp = (uint16_t)((((float)analogRead(BOARD_TEMP)*5.0/1023.0)/6.1-0.07)*1000.0);
-      inlet1A   = (float)(sensorArray[1]/(float)samples);
-      inlet2A   = (float)(sensorArray[2]/(float)samples);
-      boilPumpA = (float)(sensorArray[3]/(float)samples);
-      mashPumpA = (float)(sensorArray[4]/(float)samples);
+      inlet1A   = ((float)sensorArray[1])/numSamps;
+      inlet2A   = ((float)sensorArray[2])/numSamps;
+      boilPumpA = ((float)sensorArray[3])/numSamps;
+      mashPumpA = ((float)sensorArray[4])/numSamps;
   
       for (uint8_t clr = 0; clr < 5; clr++) {
         sensorArray[clr] = 0;
@@ -991,24 +984,6 @@ void Process_Sensors() {
   }
 }
 
-void Close_All_Valves() {
-  brewie->Reset();
-  digitalWrite(INLET_1, LOW);
-  digitalWrite(INLET_2, LOW);
-  mashPump->setPumpSpeed(0);
-  boilPump->setPumpSpeed(0);
-  setValve(VALVE_OUTLET, VALVE_CLOSE);
-  setValve(VALVE_MASH_RET, VALVE_CLOSE);
-  setValve(VALVE_BOIL_RET, VALVE_CLOSE);
-  setValve(VALVE_BOIL_IN, VALVE_CLOSE);
-  setValve(VALVE_MASH_IN, VALVE_CLOSE);
-  setValve(VALVE_HOP_1, VALVE_CLOSE);
-  setValve(VALVE_HOP_2, VALVE_CLOSE);
-  setValve(VALVE_HOP_3, VALVE_CLOSE);
-  setValve(VALVE_HOP_4, VALVE_CLOSE);
-  setValve(VALVE_COOL, VALVE_CLOSE);
-}
-
 void Run_Sparge() {
   static uint16_t spargeNull = 0;
   static uint16_t boilHigh  = 0;
@@ -1153,10 +1128,10 @@ void Fill_Boil_Tank() {
   static uint8_t fillStep = 0;
   static uint8_t fillAttempts = 0;
   static float initialMass = 0;
-  static uint16_t initialTemp = 0;
+  static float initialTemp = 0;
   static float fillTarget = 0;
   static uint32_t startTime = 0;
-  static uint16_t massTempPrevious = 0;
+  static float massTempPrevious = 0;
   static uint32_t temperatureTime = 0;
   static uint32_t waterTimeout = 0;
   
@@ -1178,7 +1153,7 @@ void Fill_Boil_Tank() {
         // Wait to let water settle, just in case
         if (millis() - waterTime > 5000) {
           initialMass = (float)massSensor/toLiter;
-          initialTemp = massTemp;
+          initialTemp = massTempInC;
           fillTarget = initialMass + 4.0;
           if (fillTarget >= ((float)brewieStep[STEP_WATER]/10.0)) {
             fillTarget = ((float)brewieStep[STEP_WATER]/10.0)-1.0;
@@ -1198,8 +1173,8 @@ void Fill_Boil_Tank() {
         Serial.print("Initial Temp: ");
         Serial.println(initialTemp);
         // If the pressure sensor temperature is high, fill relative to the current volume
-        if (initialTemp > 800) {
-          waterTimeout = 20000;
+        if (initialTemp > 30.0) {
+          waterTimeout = 15000;
           digitalWrite(INLET_1, HIGH);
           fillStep++;
           Serial.println("Temperature high, cooling down by circulating water");
@@ -1217,31 +1192,21 @@ void Fill_Boil_Tank() {
         break;
       // Fill to volume
       case 3:
-        if (initialTemp > 800) {
-          if ((millis() - waterTime) > waterTimeout) {
-            fillStep = 4;
-            Serial.println("Water Timeout hit");
-          }
-        } else {
-          if ((float)((massFast-toLiterNull)/toLiter) < fillTarget*0.95) {
+        if (millis() - waterTime > 1000) {
+          if ((float)(massSensor/toLiter) < fillTarget*0.95) {
             // Water level still low
           } else {
             // Water at level, shut down
             fillStep = 4;
           }
           if (millis() - waterTime > waterTimeout) {
-            if ((float)(massSensor/toLiter) < fillTarget*0.65) {
-              fillStep = 12;
-              digitalWrite(INLET_1, LOW);
-            } else {
-              fillStep = 4;
-            }
+            digitalWrite(INLET_1, LOW);
+            fillStep = 4;
           }
         }
         break;
       case 4:
         // Shut down
-        digitalWrite(INLET_1, LOW);
         fillStep++;
         waterTime = millis();
         break;
@@ -1268,17 +1233,17 @@ void Fill_Boil_Tank() {
         break;
       case 6:
         setValve(VALVE_BOIL_RET, VALVE_OPEN);
-        setValve(VALVE_BOIL_IN, VALVE_PINCH_ANGLE);
+        setValve(VALVE_BOIL_IN, VALVE_OPEN);
         boilPump->setPumpSpeed(255);
         waterTime = millis();
         temperatureTime = waterTime;
-        massTempPrevious = massTemp;
+        massTempPrevious = massTempInC;
         fillStep++;
         break;
       case 7:
         // Heat affects the accuracy, so run pump to acclimate
         //if (((millis() - waterTime) > 45000) && (massTemp < (waterInletTemp + 30)) || (millis() - waterTime) > 180000) {
-        if (((millis() - waterTime) > 45000) && (massTemp < (waterInletTemp + 10)) || (millis() - waterTime) > 180000) {
+        if (((millis() - waterTime) > 45000) && (massTempInC < (waterInletTemp + 2.0)) || (millis() - waterTime) > 180000) {
           if(boilPump->pumpIsDry()) {
             fillStep = 14;
           } else {
@@ -1292,14 +1257,17 @@ void Fill_Boil_Tank() {
         }
         if (millis() - temperatureTime > 20000) {
           temperatureTime = millis();
-          if (massTemp > (massTempPrevious - 4)) {
+          if (massTempInC > (massTempPrevious - 0.25)) {
             // Reached steady state
-            waterInletTemp = massTemp;
+            waterInletTemp = massTempInC;
           }
-          massTempPrevious = massTemp;
+          massTempPrevious = massTempInC;
         }
         if(boilPump->pumpIsDry()) {
           fillStep = 2;
+          boilPump->setPumpSpeed(0);
+          setValve(VALVE_BOIL_RET, VALVE_CLOSE);
+          setValve(VALVE_BOIL_IN, VALVE_CLOSE);
         }
         break;
       case 8:
@@ -1320,7 +1288,7 @@ void Fill_Boil_Tank() {
         }
         break;
       case 9:
-        if ((float)((massFast-toLiterNull)/toLiter) < (fillTarget - 0.05)) {
+        if ((float)(massSensor/toLiter) < (fillTarget - 0.05)) {
           // Water level still low
         } else {
           // Water at level, shut down
@@ -1347,13 +1315,13 @@ void Fill_Boil_Tank() {
           } else {
             // Filled to volume
             fillStep = 0;
-            if (massTemp < (massTempPrevious - 20)) {
+            if (massTempInC < (massTempPrevious - 0.25)) {
               Serial.println("Temperature still changing");
-              //fillStep = 6;
+              fillStep = 6;
             } else {
               waterFilled = true;
               brewieWaterFill = false;
-              waterInletTemp = massTemp;
+              waterInletTemp = massTempInC;
             }
           }
           waterTime = millis();
@@ -1429,6 +1397,7 @@ void Safety_Check() {
   } else if (acCurrent < 2.0) {
     // Heater undercurrent check (should be ~10-12 for 120V, 7-10 for 240V)
     if (brewie->MashHeaterOn()) {
+      Serial.println("Say what?");
       if (digitalRead(POWER_LIGHT) == LOW) {
         digitalWrite(POWER_LIGHT, HIGH);
       } else {
@@ -1448,6 +1417,7 @@ void Safety_Check() {
     if (brewie->MashHeaterOn()) {
       heaterCheck+=2;
       digitalWrite(POWER_LIGHT, HIGH);
+      //Serial.println("Mash Heater Test");
       if (machineVoltage == 0 && heaterCheck > 2) {
         if (acCurrent > 10) {
           machineVoltage = 120;
@@ -1464,6 +1434,7 @@ void Safety_Check() {
     if (brewie->BoilHeaterOn()) {
       heaterCheck+=2;
       digitalWrite(DRAIN_LIGHT, HIGH);
+      //Serial.println("Boil Heater Test");
       if (machineVoltage == 0 && heaterCheck > 2) {
         if (acCurrent > 10) {
           machineVoltage = 120;
@@ -1559,27 +1530,18 @@ void Safety_Check() {
 
     // If heaters seem off for more than a second or so, increment counter
     if (brewie->ReadMashError()) {
-      safetyCheckCount+=6;
-      if (safetyCheckCount > 10) {
-        safetyCheckCount = 0;
-        safetyShutdown = true;
-        if (AddNotification("E007")) {
-          Brewie_Pause();
-        }
+      safetyShutdown = true;
+      if (AddNotification("E007")) {
+        Brewie_Pause();
       }
     }
     if (brewie->ReadBoilError()) {
-      safetyCheckCount+=6;
-      if (safetyCheckCount > 10) {
-        safetyCheckCount = 0;
-        safetyShutdown = true;
-        if (AddNotification("E008")) {
-          Brewie_Pause();
-        }
+      safetyShutdown = true;
+      if (AddNotification("E008")) {
+        Brewie_Pause();
       }
     }
     if (brewie->ReadCoolingError()) {
-      safetyCheckCount = 0;
       safetyShutdown = true;
       if (AddNotification("E006")) {
         Brewie_Pause();
@@ -1630,8 +1592,8 @@ void Brewie_Status() {
     Process_Temperature();
     brewie->Temperature_Average();
     
-    mashPump->Pump_Speed_Control((uint16_t)mashPumpA);
-    boilPump->Pump_Speed_Control((uint16_t)boilPumpA);
+    mashPump->Pump_Speed_Control(mashPumpA);
+    boilPump->Pump_Speed_Control(boilPumpA);
 
     // Water Inlet functionality - Prevent Overflows
     if (brewing) {
@@ -1733,6 +1695,7 @@ void Initialize_2560() {
   PORTK |= 0x80;  // ADC15 input high
 
   // Set unused pins to input high
+  DDRA |= 0xFF;
   DDRE &= ~0xC8;
   PORTE |= 0xC8;
   DDRH &= ~0x3F;
@@ -1753,11 +1716,11 @@ void Initialize_2560() {
   PORTF |= 0xF8;
 
   // Set up Timer 3 for AC Line tracking
-  TCCR3A = _BV(WGM31);
-  TCCR3B = _BV(WGM33) + _BV(WGM32) + _BV(CS31);
-  ICR3 = 62500;
-  OCR3A = 1;
-  //TIMSK3 |= _BV(TOIE3) + _BV(OCIE3A);
+  TCCR3A = 0;
+  TCCR3B = _BV(CS32) + _BV(CS30);
+  //OCR3A = 65535;
+  //OCR3B = 65535;
+  TIMSK3 |= _BV(TOIE3);
 
   // Set up Timer 4 for Servos
   TCCR4A = _BV(WGM41);
@@ -1766,9 +1729,9 @@ void Initialize_2560() {
   OCR4A = 2000;
   //TIMSK4 |= _BV(TOIE4) + _BV(OCIE4A);
   // Set up Valve pins + Inlets
-  DDRJ |= 0x7C;
-  DDRA |= 0xFF;
-  DDRC |= 0x02;
+  //DDRJ |= 0x7C;
+  //DDRA |= 0xFF;
+  //DDRC |= 0x02;
 
   // Set up Timer 5 for lights
   //TCCR5A = _BV(COM5C0);
@@ -1843,10 +1806,28 @@ void Initialize_2560() {
   ADCSRA = 0x86;
 
   Brewie_Reset();
-  PORTB = 0;
-  PORTJ = 0;
+  //PORTB = 0;
+  //PORTJ = 0;
   DDRE |= 0x02;
   PORTE &= ~0x02;
+}
+
+void Close_All_Valves() {
+  brewie->setTemperatures(0,0);
+  digitalWrite(INLET_1, LOW);
+  digitalWrite(INLET_2, LOW);
+  mashPump->setPumpSpeed(0);
+  boilPump->setPumpSpeed(0);
+  setValve(VALVE_OUTLET, VALVE_CLOSE);
+  setValve(VALVE_MASH_RET, VALVE_CLOSE);
+  setValve(VALVE_BOIL_RET, VALVE_CLOSE);
+  setValve(VALVE_BOIL_IN, VALVE_CLOSE);
+  setValve(VALVE_MASH_IN, VALVE_CLOSE);
+  setValve(VALVE_HOP_1, VALVE_CLOSE);
+  setValve(VALVE_HOP_2, VALVE_CLOSE);
+  setValve(VALVE_HOP_3, VALVE_CLOSE);
+  setValve(VALVE_HOP_4, VALVE_CLOSE);
+  setValve(VALVE_COOL, VALVE_CLOSE);
 }
 
 void Brewie_Reset() {
@@ -1874,17 +1855,32 @@ void Brewie_Reset() {
 
 void Power_On() {
   digitalWrite(POWER_LIGHT, HIGH);
-  PORTH |= 0x80;
-  delay(200);
-  digitalWrite(PWR_EN_5V, HIGH);
-  delay(200);
-  digitalWrite(PWR_EN_5V, LOW);
-  digitalWrite(PWR_EN_ARM, HIGH);
-  delay(500);
-  Close_All_Valves();
-  powerOn = true;
-  TIMSK5 |= _BV(TOIE5) + _BV(OCIE5C);
-  DDRE &= ~0x02;
+  if (!powerOn) {
+    PORTH |= 0x80;
+    Brewie_Reset();
+    delay(200);
+    digitalWrite(PWR_EN_5V, HIGH);
+    delay(200);
+    digitalWrite(PWR_EN_5V, LOW);
+    digitalWrite(PWR_EN_ARM, HIGH);
+    digitalWrite(PWR_EN_SERVO, HIGH); 
+    delay(500);
+    Close_All_Valves();
+    powerOn = true;
+    TIMSK5 |= _BV(TOIE5) + _BV(OCIE5C);
+    DDRE &= ~0x02;
+
+    Serial.print("!Scanning I2C...");
+    uint8_t iAddress = ScanTWI();
+    Serial.println("done");
+    if (iAddress > 1 && iAddress < 128) {
+      //massAddress = iAddress; 
+      Serial.print("!Pressure sensor found at address: 0x");
+      Serial.println(iAddress, HEX);
+    } else {
+      Serial.println("!Pressure sensor not found!");
+    }
+  }
 }
 
 void Power_Off() {
@@ -1940,15 +1936,22 @@ void Fast_Water_Readings() {
   }
 }
 
-ISR(TIMER3_COMPA_vect){
+/*ISR(TIMER3_COMPA_vect){
   cli();
-  PORTE &= ~0x04;
+  PORTG |= 0x10;
   sei();
 }
 
-ISR(TIMER3_OVF_vect){
+ISR(TIMER3_COMPB_vect){
   cli();
   PORTE |= 0x04;
+  sei();
+}*/
+
+ISR(TIMER3_OVF_vect){
+  cli();
+  //boilTicks = 0;
+  //mashTicks = 0;
   sei();
 }
 
