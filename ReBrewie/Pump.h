@@ -19,6 +19,7 @@ class Pump {
     uint16_t pumpFlow();
     float flowRate();
     float flowTotal();
+    void setFlowScale(float);
     bool isRunning();
 
     volatile uint8_t* pumpTicks;
@@ -49,8 +50,7 @@ class Pump {
     float _expectedCurrent;
     float _flowRate;
     float _flowTotal;
-    float _pumpScaleI;
-    float _pumpConstI;
+    float _flowScale = 1.0;
 
     uint32_t _pumpTime;
 };

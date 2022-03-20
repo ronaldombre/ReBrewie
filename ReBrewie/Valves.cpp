@@ -13,6 +13,7 @@ uint8_t valvePWM = 0;
 uint8_t valveCount = 0;
 
 bool setValve(uint8_t valve, uint8_t angle) {
+  digitalWrite(PWR_EN_SERVO, HIGH);
   uint16_t setAngle = 0;
 
   // Use 0 and 1 to mean closed and open, but also allow for custom angles for higher values
@@ -63,6 +64,7 @@ bool setValve(uint8_t valve, uint8_t angle) {
       valveError[valve] = 0;
     }
     valveState[valve] = setAngle;
+    digitalWrite(PWR_EN_SERVO, LOW);
   }
   return valveState[valve] > VALVE_CLOSE_ANGLE;
 }

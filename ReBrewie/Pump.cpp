@@ -10,6 +10,7 @@ Pump::Pump(uint8_t pin, bool channel) {
   _pumpChannel = channel;
   _pumpIsClogged = false;
   _pumpDry = false;
+  _flowTotal = 0.0;
 }
 
 void Pump::Pump_Speed_Control(float current) {
@@ -32,7 +33,7 @@ void Pump::Pump_Speed_Control(float current) {
     float minCurrent = 0.004471*pumpSpeedf*pumpSpeedf-0.095061*pumpSpeedf+22.881203;
     float diffCurrent = _pumpCurrent - minCurrent;
     if (diffCurrent > 0) {
-      _flowRate = 26.2*pow((_pumpCurrent - minCurrent),0.333);
+      _flowRate = _flowScale*26.0*pow((_pumpCurrent - minCurrent),0.333);
     } else {
       _flowRate = 0;
     }
@@ -267,6 +268,10 @@ float Pump::flowRate() {
 
 float Pump::flowTotal() {
   return _flowTotal;
+}
+
+void Pump::setFlowScale(float scale) {
+  _flowScale = scale;
 }
 
 uint8_t Pump::pumpDiag() {

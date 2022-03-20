@@ -986,13 +986,15 @@ void Process_Sensors() {
 
 void Run_Sparge() {
   static uint16_t spargeNull = 0;
-  static uint16_t boilHigh  = 0;
-  static uint16_t boilLow = 0;
+  static int16_t boilHigh  = 0;
+  static int16_t boilLow = 0;
+  static int16_t boilStart = 0;
   static uint16_t mashSide = 2000;
   static uint8_t spargeStep = 0;
   static uint32_t spargeTime = 0;
   static uint16_t flowResult = 0;
   static uint16_t mashFlowResult = 0;
+  static float mashTotalFlow = 0.0;
   if (spargeOverride && !brewiePause) {
     switch (spargeStep) {
       case 0:
@@ -1005,7 +1007,6 @@ void Run_Sparge() {
       case 1:
         if (millis() - spargeTime > 4000) {
           spargeNull = massSensor;
-          boilLow = spargeNull;
           // Worth it???
           if (spargeNull < (uint16_t)(22*toLiter)) {
             spargeStep++;
@@ -1072,29 +1073,39 @@ void Run_Sparge() {
         setValve(VALVE_BOIL_IN, VALVE_CLOSE);
         setValve(VALVE_MASH_IN, VALVE_OPEN);
         mashFlowResult = mashPump->pumpFlow();
+        mashTotalFlow = mashPump->flowTotal();
         mashPump->setPumpSpeed(spargePumpSpeed);
         spargeTime = millis();
         spargeStep++;
         break;
       case 7:
         // Wait for things to settle
-        if (millis() - spargeTime > 15000) {
+        if (millis() - spargeTime > 4000) {
+          boilLow = spargeNull;
           spargeStep++;
         }
         break;
       case 8:
+        // Wait for things to settle
+        if (millis() - spargeTime > 15000) {
+          spargeStep++;
+        }
+        break;
+      case 9:
       {
         // Adjust sparge routine to even out water level
         int16_t tachDiff = (int16_t)(boilPump->pumpFlow() - (mashSide - mashFlowResult));
-        int16_t deltaBoil = (int16_t)(boilHigh - boilLow);
-        boilLow = massSensor;
-        int16_t deltaMash = (int16_t)(boilHigh - boilLow);
-        mashSide = mashSide/2 + 1000 + (deltaMash - deltaBoil) + (int16_t)(spargeNull - massSensor)*2 + (tachDiff/5);
+        int16_t deltaBoil = boilHigh - boilLow;
+        int16_t deltaMash = boilHigh - boilStart;
+        boilStart = boilLow;
+        mashSide = mashSide/2 + 1000 + (deltaMash - deltaBoil) + (int16_t)(spargeNull - massSensor)*2;
         if (mashSide < 800) {
           mashSide = 800;
         } else if (mashSide > 3200) {
           mashSide = 3200;
         }
+        boilPump->setFlowScale(((float)deltaBoil/toLiter)/boilPump->flowTotal()*1000.0);
+        mashPump->setFlowScale(((float)deltaMash/toLiter)/mashTotalFlow*1000.0);
         Serial.print("Sparge Null: ");
         Serial.print(spargeNull);
         Serial.print("Mash Adjustment: ");
@@ -1863,7 +1874,6 @@ void Power_On() {
     delay(200);
     digitalWrite(PWR_EN_5V, LOW);
     digitalWrite(PWR_EN_ARM, HIGH);
-    digitalWrite(PWR_EN_SERVO, HIGH); 
     delay(500);
     Close_All_Valves();
     powerOn = true;
