@@ -1211,13 +1211,13 @@ void Fill_Boil_Tank() {
             fillStep = 4;
           }
           if (millis() - waterTime > waterTimeout) {
-            digitalWrite(INLET_1, LOW);
             fillStep = 4;
           }
         }
         break;
       case 4:
         // Shut down
+        digitalWrite(INLET_1, LOW);
         fillStep++;
         waterTime = millis();
         break;
@@ -1565,11 +1565,11 @@ void Brewie_Status() {
   // Print out status info every second
   uint32_t currTime = millis();
   uint32_t timeDiff = currTime - statusTime;
-  if (timeDiff >= 999) {
+  if (timeDiff >= 1000) {
     statusTime = currTime;
-    uint8_t extraTime = (timeDiff/999);
-    leftOverTime += timeDiff % 999;
-    if (leftOverTime > 1000) {
+    uint8_t extraTime = (timeDiff/1000);
+    leftOverTime += timeDiff % 1000;
+    if (leftOverTime >= 1000) {
       extraTime++;
       leftOverTime = leftOverTime % 1000;
     }
