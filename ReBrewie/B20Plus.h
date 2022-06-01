@@ -1,4 +1,5 @@
 #ifndef B20Plus
+#define B20Plus
 
 // Step Positions
 #define STEP_WATER_INLET  1
