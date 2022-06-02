@@ -10,5 +10,5 @@ This firmware, for the most part, is fully compatible with the original stock Br
 # Future Work
 If someone has the time to try to port this over to the B20, that would be amazing. The main thing to figure out would be the pump control, since Brewie used valve controls to slow down the pump for hopping. Maybe PWM or some other sort of valve control would be suitable. The other piece would be the weight sensor, but all that would be required is to figure out where the data is and the rest should fit into the current flow.
 
-#Building and Flashing
+# Building and Flashing
 The Brewie uses the Atmega2560, and the firmware is built using Arduino with the Mega2560 platform. In the build directory, copy the file over to your running Brewie. Make sure the BrewieApplication is shut down, and run "./brewie-upload-fw ReBrewie.ino.hex". B20+ users will need to run it two or three times to be successful, or modify the upload script.
