@@ -238,10 +238,10 @@ void Pump::writeDAC() {
   uint8_t data2 = dataPack & 0x00FF;
   SPI.beginTransaction(SPISettings(250000, MSBFIRST, SPI_MODE0));
   //pinMode(53, OUTPUT);
-  PORTB &= ~0x10;
+  digitalWrite(SPEED_CTRL_CS, LOW);
   SPI.transfer(data1);
   SPI.transfer(data2);
-  PORTB |= 0x10;
+  digitalWrite(SPEED_CTRL_CS, HIGH);
   //pinMode(53, INPUT);
   SPI.endTransaction();
 }
