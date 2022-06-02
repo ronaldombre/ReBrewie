@@ -2,8 +2,6 @@
 #include <DallasTemperature.h>
 #include <SPI.h>
 
-//#define B20
-
 #include "Brewie.h"
 #include "Pump.h"
 #include "Heater.h"
@@ -1764,7 +1762,7 @@ void Initialize_2560() {
   pinMode(SPEED_CTRL_LDAC, OUTPUT);
   pinMode(SPEED_CTRL_CS, OUTPUT);
   digitalWrite(SPEED_CTRL_LDAC, LOW);  // ~LDAC (Leave low to have output latch at end of SPI transfer)
-  digitalWrite(SPEED_CTRL_CS, LOW); // DAC ~CS
+  digitalWrite(SPEED_CTRL_CS, HIGH); // DAC ~CS
   pinMode(50, INPUT);   //MISO, DAC doesn't send any data though
   pinMode(53, OUTPUT);  //Main ~CS, needs to be output for SPI to work
 
