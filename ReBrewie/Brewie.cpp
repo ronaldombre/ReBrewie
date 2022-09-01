@@ -61,6 +61,7 @@ void Brewie::setTemperatures(float mashSetTemp, float boilSetTemp) {
   } else {
     _boilHeaterControl = 0;
     _boilHeatSet = false;
+    _boilCooling = false;
     //BoilHeater->turnOff();
     //TIMSK3 &= ~_BV(OCIE3B);
   }
@@ -230,11 +231,12 @@ void Brewie::Temperature_Control() {
     _boilTimer = currentTime;                                // Add back what the mash heater took from the boil heater. Boil heater gets remaining time
 
     // Perform mash heater power on check
-    if (energyCheck < (float)(0.1*_mashHeaterControl/_heaterControlTime)) {
-      _mashError = true;
-      Serial.println("!Mash Heater Error Detected");
-    } else {
-      _mashError = false;
+    if (_mashHeaterControl > 3000) {
+      if (energyCheck < (float)(0.1*(float)_mashHeaterControl)) {
+        _mashError = true;
+      } else {
+        _mashError = false;
+      }
     }
   } else if (_boilHeaterEnable && (currentTime - _boilTimer > _boilHeaterControl)) {
     _boilHeaterEnable = false;
@@ -243,10 +245,12 @@ void Brewie::Temperature_Control() {
     _lastEnergy = *_powerMeasure;
 
     // Perform boil heater power on check
-    if (energyCheck < (float)(0.1*_boilHeaterControl/_heaterControlTime)) {
-      _boilError = true;
-    } else {
-      _boilError = false;
+    if (_boilHeaterControl > 3000) {
+      if (energyCheck < (float)(0.1*(float)_boilHeaterControl)) {
+        _boilError = true;
+      } else {
+        _boilError = false;
+      }
     }
   } else if (_boilCoolingEnable && (currentTime - _boilTimer > _boilCoolingControl)) {
     _boilCoolingEnable = false;
@@ -413,6 +417,9 @@ void Brewie::Control_Calculation() {
 }
 
 void Brewie::Cooling_Calculation() {
+  if (_boilSetTemp == 0) {
+    return;
+  }
   // Enable or disable heaters based on current temperature
   if (_boilCooling) {
     if (*_boilTemp <= _boilSetTemp) {
