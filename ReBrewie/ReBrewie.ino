@@ -315,7 +315,9 @@ void Brewie_Command_Decode() {
         boilPump->setPumpSpeed(0);
       } else if (commandNum == 28) {
         brewie->SetCooling();
+        brewie->setTemperatures(-1.0, atof(&brewieData[brewieCommand[1][0]])/10.0);
       } else if (commandNum == 29) {
+        brewie->setTemperatures(-1.0, 0);
         brewie->SetHeating();
       } else if (commandNum == 12) {
         setValve(VALVE_MASH_IN, VALVE_OPEN);
@@ -369,6 +371,7 @@ void Brewie_Command_Decode() {
         brewie->setTemperatures(atof(&brewieData[brewieCommand[1][0]])/10.0, -1.0);
         safetyShutdown = false;
       } else if (commandNum == 51) {
+        brewie->SetHeating();
         brewie->setTemperatures(-1.0, atof(&brewieData[brewieCommand[1][0]])/10.0);
         safetyShutdown = false;
       }
