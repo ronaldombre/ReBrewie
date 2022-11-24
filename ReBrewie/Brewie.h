@@ -5,6 +5,8 @@ class Brewie {
   public:
     Brewie();
     void setTemperatures(float, float);
+    void setMashTemp(float);
+    void setBoilTemp(float);
     void setTemperatureSensors(float*, float*);
     void setPowerSensor(float*);
     void Temperature_Average();

@@ -19,31 +19,31 @@ void Brewie::setTemperatures(float mashSetTemp, float boilSetTemp) {
   _mashTempReached = false;
   _mashError = false;
   _boilError = false;
-  if (mashSetTemp <= 0.0 && boilSetTemp <= 0.00) {
-    // Don't disturb heater control for turning it off
-  } else {
-    _heaterTime = 0;
-  }
-  if (mashSetTemp >= 0.0) {
-    _mashSetTemp = mashSetTemp;
-  }
-  if (boilSetTemp >= 0.0) {
-    _boilSetTemp = boilSetTemp;
-  }
   _mashHeaterControl = 0;
   _boilHeaterControl = 0;
-  _boilingCount = 0;
-  
-  if (_mashSetTemp > 10.0) {
+
+  // Prep mash side (values less than 0 have no effect)
+  if (mashSetTemp >= 5.0) {
+    _mashSetTemp = mashSetTemp;
     _mashHeatSet = true;
-    //TIMSK3 |= _BV(OCIE3A);
-  } else {
-    _mashHeaterControl = 0;
+    _heaterTime = 0;
+  } else if (mashSetTemp >= 0.0) {
     _mashHeatSet = false;
-    //MashHeater->turnOff();
-    //TIMSK3 &= ~_BV(OCIE3A);
+    _mashSetTemp = 0.0;
   }
 
+  // Prep boil side (values less than 0 have no effect)
+  if (boilSetTemp >= 5.0) {
+    _boilSetTemp = boilSetTemp;
+    _boilHeatSet = !_boilCooling;
+    _boilingCount = 0;
+    _heaterTime = 0;
+  } else if (boilSetTemp >= 0.0) {
+    _boilHeatSet = false;
+    _boilCooling = false;
+    _boilSetTemp = 0.0;
+  }
+  
   if (_boilCooling) {
     _heaterControlTime = 5000;
   } else {
@@ -53,18 +53,48 @@ void Brewie::setTemperatures(float mashSetTemp, float boilSetTemp) {
       _heaterControlTime = 20000;
     }
   }
-    
-  if (_boilSetTemp > 10.0) {
-    _boilHeatSet = true;
-    _boilingCount = 0;
-    //TIMSK3 |= _BV(OCIE3B);
+}
+
+void Brewie::setMashTemp(float mashSetTemp) {
+  _mashTempReached = false;
+  _mashError = false;
+  _mashHeaterControl = 0;
+
+  if (mashSetTemp >= 5.0) {
+    _mashSetTemp = mashSetTemp;
+    _mashHeatSet = true;
+    _heaterTime = 0;
   } else {
-    _boilHeaterControl = 0;
+    _mashHeatSet = false;
+    _mashSetTemp = 0.0;
+  }
+}
+
+void Brewie::setBoilTemp(float boilSetTemp) {
+  _boilTempReached = false;
+  _boilError = false;
+  _boilHeaterControl = 0;
+
+  if (boilSetTemp >= 5.0) {
+    _boilSetTemp = boilSetTemp;
+    _boilHeatSet = !_boilCooling;
+    _boilingCount = 0;
+    _heaterTime = 0;
+  } else if (boilSetTemp >= 0.0) {
     _boilHeatSet = false;
     _boilCooling = false;
-    //BoilHeater->turnOff();
-    //TIMSK3 &= ~_BV(OCIE3B);
+    _boilSetTemp = 0.0;
   }
+  
+  if (_boilCooling) {
+    _heaterControlTime = 5000;
+  } else {
+    if (_boilSetTemp >= 88.0) {
+      _heaterControlTime = 40000;
+    } else {
+      _heaterControlTime = 20000;
+    }
+  }  
 }
 
 void Brewie::setTemperatureSensors(float* mashTemp, float* boilTemp) {
@@ -215,7 +245,7 @@ void Brewie::Temperature_Control() {
     _boilTempAverageLast = _boilTempAverage;
 
     // Diagnostic Information
-    if (_mashHeatSet || _boilHeatSet) {
+    if (_mashHeatSet || _boilHeatSet || _boilCooling) {
       PrintDiagnostics();
     }
   } 
@@ -232,7 +262,7 @@ void Brewie::Temperature_Control() {
 
     // Perform mash heater power on check
     if (_mashHeaterControl > 3000) {
-      if (energyCheck < (float)(0.1*(float)_mashHeaterControl)) {
+      if (energyCheck < (float)(0.1*(float)_mashHeaterControl/1000.0)) {
         _mashError = true;
       } else {
         _mashError = false;
@@ -246,7 +276,7 @@ void Brewie::Temperature_Control() {
 
     // Perform boil heater power on check
     if (_boilHeaterControl > 3000) {
-      if (energyCheck < (float)(0.1*(float)_boilHeaterControl)) {
+      if (energyCheck < (float)(0.1*(float)_boilHeaterControl/1000.0)) {
         _boilError = true;
       } else {
         _boilError = false;
@@ -269,28 +299,24 @@ void Brewie::Temperature_Control() {
   }
 
   // Turn on heaters if permitted
-  //if (TIMSK3 & _BV(OCIE3A) == 0) {
-    if (_mashHeatSet) {
-      if (_mashHeaterEnable) {
-          MashHeater->turnOn();
-      } else {
-        MashHeater->turnOff();
-      }
+  if (_mashHeatSet) {
+    if (_mashHeaterEnable) {
+        MashHeater->turnOn();
     } else {
       MashHeater->turnOff();
     }
-  //}
-  //if (TIMSK3 & _BV(OCIE3B) == 0) {
-    if (_boilHeatSet && !_boilCooling) {
-      if (_boilHeaterEnable && !_mashHeaterEnable) {
-          BoilHeater->turnOn();
-      } else {
-        BoilHeater->turnOff();
-      }
+  } else {
+    MashHeater->turnOff();
+  }
+  if (_boilHeatSet && !_boilCooling) {
+    if (_boilHeaterEnable && !_mashHeaterEnable) {
+        BoilHeater->turnOn();
     } else {
       BoilHeater->turnOff();
     }
-  //}
+  } else {
+    BoilHeater->turnOff();
+  }
 }
 
 void Brewie::Control_Calculation() {
@@ -413,13 +439,9 @@ void Brewie::Control_Calculation() {
   } else {
     _boilHeaterControl = 0;
   }
-  //OCR3B = 65535 - (uint16_t)((float)_boilHeaterControl*3.27675);
 }
 
 void Brewie::Cooling_Calculation() {
-  if (_boilSetTemp == 0) {
-    return;
-  }
   // Enable or disable heaters based on current temperature
   if (_boilCooling) {
     if (*_boilTemp <= _boilSetTemp) {
@@ -513,6 +535,9 @@ void Brewie::SetBoilingPoint(float bPoint) {
 
 void Brewie::SetCooling() {
   _boilCooling = true;
+  if (_boilSetTemp == 0) {
+    _boilSetTemp = 10;
+  }
   _coolingError = false;
   _heaterControlTime = 5000;
 }
