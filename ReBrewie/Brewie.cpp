@@ -1,11 +1,15 @@
 #include "Brewie.h"
-#include "B20Plus.h"
+#include "HardwareConfig.h"
 
 int32_t heaterMinimumCycleTime = 2000;
 
 Brewie::Brewie() {
   MashHeater = new Heater(MASH_HEATER);
+#if BREWIE_HARDWARE_B20
+  BoilHeater = new Heater(BOIL_HEATER);
+#else
   BoilHeater = new Heater(&BOIL_PORT, &BOIL_DIR, BOIL_PIN);
+#endif
   _heaterControlTime = 20000;
   _boilingPoint = 100.0;
   _mashHeaterEnergy = 0.0;
@@ -286,6 +290,7 @@ void Brewie::Temperature_Control() {
     _boilCoolingEnable = false;
   }
   
+#if !BREWIE_HARDWARE_B20
   if (_boilCooling) {
     if (_boilCoolingEnable) {
       digitalWrite(INLET_2, HIGH);
@@ -297,6 +302,7 @@ void Brewie::Temperature_Control() {
       digitalWrite(INLET_2, LOW);
     }
   }
+#endif
 
   // Turn on heaters if permitted
   if (_mashHeatSet) {

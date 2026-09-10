@@ -2,7 +2,7 @@
 #define Valves_h
 
 #include <Arduino.h>
-#include "B20Plus.h"
+#include "HardwareConfig.h"
 // Valves
 #define VALVE_MASH_IN       0
 #define VALVE_BOIL_RET      1

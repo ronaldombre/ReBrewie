@@ -1,8 +1,11 @@
 #include "Valves.h"
 
-#ifdef  B20
+#if BREWIE_HARDWARE_B20
+// Physical B20 harness: valve 9 is unused; the logical outlet and cooling
+// assignments are crossed relative to the earlier table: outlet uses PJ4,
+// cooling uses PJ5.
 volatile uint8_t* Valve_Port[10]  = { &PORTA, &PORTA, &PORTJ, &PORTJ, &PORTA, &PORTA, &PORTA, &PORTA, &PORTA, &PORTA };
-uint8_t Valve_Bitmask[10]         = { 0x01,   0x08,   0x02,   0x01,   0x10,   0x20,   0x40,   0x80,   0x02,   0x04 };
+uint8_t Valve_Bitmask[10]         = { 0x01,   0x08,   0x10,   0x20,   0x10,   0x20,   0x40,   0x80,   0x02,   0x04 };
 #else
 volatile uint8_t* Valve_Port[10]  = { &PORTJ, &PORTJ, &PORTJ, &PORTJ, &PORTA, &PORTA, &PORTA, &PORTA, &PORTA, &PORTC };
 uint8_t Valve_Bitmask[10]         = { 0x04,   0x08,   0x20,   0x40,   0x20,   0x08,   0x80,   0x10,   0x40,   0x02 };
@@ -13,7 +16,14 @@ uint8_t valvePWM = 0;
 uint8_t valveCount = 0;
 
 bool setValve(uint8_t valve, uint8_t angle) {
+  // B20 uses PJ2 as the valve-converter enable. B20+ uses its original
+  // Arduino-mapped servo-enable signal.
+#if BREWIE_HARDWARE_B20
+  B20_VALVE_POWER_DDR |= _BV(B20_VALVE_POWER_BIT);
+  B20_VALVE_POWER_PORT |= _BV(B20_VALVE_POWER_BIT);
+#else
   digitalWrite(PWR_EN_SERVO, HIGH);
+#endif
   uint16_t setAngle = 0;
 
   // Use 0 and 1 to mean closed and open, but also allow for custom angles for higher values
@@ -64,7 +74,11 @@ bool setValve(uint8_t valve, uint8_t angle) {
       valveError[valve] = 0;
     }
     valveState[valve] = setAngle;
-    digitalWrite(PWR_EN_SERVO, LOW);
+#if BREWIE_HARDWARE_B20
+  B20_VALVE_POWER_PORT &= (uint8_t)~_BV(B20_VALVE_POWER_BIT);
+#else
+  digitalWrite(PWR_EN_SERVO, LOW);
+#endif
   }
   return valveState[valve] > VALVE_CLOSE_ANGLE;
 }

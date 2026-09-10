@@ -180,11 +180,10 @@ void Pump::setPumpSpeed(uint8_t pumpSpeed) {
     _pumpDiag = 0;
     _pumpEnable = false;
     _pumpOut = false;
-    //digitalWrite(_pumpPin, LOW);
+    digitalWrite(_pumpPin, LOW);
   } else {
     _running = true;
     _pumpDiag = 255;
-    PORTH |= 0x80;
     digitalWrite(_pumpPin, HIGH);
     _pumpEnable = true;
     _pumpSpeedRestart = _pumpSpeed;
@@ -204,11 +203,10 @@ void Pump::_setPumpSpeed() {
     _running = false;
     _pumpDiag = 0;
     _pumpEnable = false;
-    //digitalWrite(_pumpPin, LOW);
+    digitalWrite(_pumpPin, LOW);
   } else {
     _running = true;
     _pumpDiag = 255;
-    PORTH |= 0x80;
     digitalWrite(_pumpPin, HIGH);
     _pumpEnable = true;
   }
@@ -224,6 +222,7 @@ void Pump::_stopPump() {
   _pumpDry = false;
   _running = false;
   _pumpDiag = 0;
+  digitalWrite(_pumpPin, LOW);
 }
 
 void Pump::writeDAC() {
